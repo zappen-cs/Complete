@@ -42,7 +42,7 @@ struct input_event {
 
 **参考资料：**
 
-[What happens when a key is pressed]([What happens when a key is pressed - (1) · Hanaasagi - (ゝω·)~ kira (dreamfever.me)](https://blog.dreamfever.me/posts/2022-01-04-what-happens-when-a-key-is-pressed-1/))
+[What happens when a key is pressed](https://blog.dreamfever.me/posts/2022-01-04-what-happens-when-a-key-is-pressed-1/)
 
 [键盘敲入A字母时，期间发生了什么....](https://juejin.cn/post/6864158680028774407)
 
