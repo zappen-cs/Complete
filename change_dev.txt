@@ -1,5 +1,6 @@
 #对于X11和Wayland通用
- 
+
+
 #鼠标/键盘为eventX
 #禁用鼠标/键盘
 sudo udevadm trigger --action=remove /dev/input/eventX
