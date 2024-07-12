@@ -72,6 +72,7 @@ static int creat_vir_input_device() {
 	ioctl(vir_input_fd, UI_SET_EVBIT, EV_REL); // 相对事件
 	ioctl(vir_input_fd, UI_SET_RELBIT, REL_X); // x轴相对坐标
 	ioctl(vir_input_fd, UI_SET_RELBIT, REL_Y); // y轴相对坐标
+	ioctl(vir_input_fd, UI_SET_RELBIT, REL_WHEEL); // 滚轮相对坐标
 											   //
 	/* 写入设备信息 */
 	ret = write(vir_input_fd, &vir_input_dev, sizeof(struct uinput_user_dev));
