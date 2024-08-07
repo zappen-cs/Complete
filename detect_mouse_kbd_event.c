@@ -3,6 +3,7 @@
 #include <string.h>
 #include <dirent.h>
 #include <fcntl.h>
+#include <ctype.h>
 #include <unistd.h>
 #include <limits.h>
 #include <linux/input.h>
@@ -49,6 +50,14 @@ int is_mouse_device(const char *device) {
 
     close(fd);
     return 0;
+}
+
+char* to_lower_str(const char* device_info){
+    char* ret_str = calloc(strlen(device_info), sizeof(char));
+    for(int i = 0; i < strlen(device_info); ++i){
+        ret_str[i] = tolower(device_info[i]);
+    }
+    return ret_str;
 }
 
 
@@ -98,18 +107,28 @@ int is_kbd_device(const char *device) {
     return 0;
 }
 
-
+int is_virtual(const char *device_info) {
+    char* device_info_low = to_lower_str(device_info);
+    int flag = strstr(device_info_low, "virtual") != NULL;
+    free(device_info_low);
+    return flag;
+}
 
 int is_mouse(const char *device_info) {
-    // Check if the line contains Mouse"
-    // Filter VITRUAL devices
-    return (strstr(device_info, "Mouse") != NULL && strstr(device_info, "Virtual") == NULL);
+    // Check if the line contains mouse"
+    char* device_info_low = to_lower_str(device_info);
+    int flag = strstr(device_info, "mouse") != NULL;
+    free(device_info_low);
+    return flag;
 }
 
 
 int is_kbd(const char *device_info) {
-    // Check if the line contains "USB" and "Mouse"
-    return (strstr(device_info, "keyboard") != NULL || strstr(device_info, "Keyboard") != NULL && strstr(device_info, "Virtual") == NULL) ;
+    // Check if the line contains "keyboard" or "kbd"
+    char* device_info_low = to_lower_str(device_info);
+    int flag = strstr(device_info, "keyboard") != NULL || strstr(device_info, "kbd") != NULL;
+    free(device_info_low);
+    return flag;
 }
 
 
@@ -118,7 +137,7 @@ char* get_event_file(const char *device_info){
 }
 
 
-char** detect_mouse(int *count) {
+char** detect_all_mouse(int *count) {
     FILE *fp;
     char line[MAX_LINE_LENGTH];
     char path[PATH_MAX];
@@ -133,21 +152,24 @@ char** detect_mouse(int *count) {
 
     // If current device is mouse
     int flag = 0;
-    int is_usb = 0;
+    int virtual = 0;
+    int usb = 0;
     // Read line by line
     while (fgets(line, sizeof(line), fp)) {
         // Check if the device is a usb device
         if (line[0] == 'I'){
-            is_usb = strstr(line, "Bus=0003") != NULL;
+            usb = strstr(line, "Bus=0003") != NULL;
         }
         // Check if the device is mouse
         if (line[0] == 'N'){
-            flag = is_mouse(line) && is_usb;
+            flag = is_mouse(line);
+            virtual = is_virtual(line);
         }
         // Find eventX in handler
-        if (line[0] == 'H' && flag) {
+        if (line[0] == 'H' && usb && !virtual && (flag || is_mouse(line))) {
             flag = 0;
-            is_usb = 0;
+            usb = 0;
+            virtual = 0;
             snprintf(path, sizeof(path), "%s%s", INPUT_DIR, get_event_file(line));
             char *end = strchr(path, '\n');
             *(end-1) = '\0';
@@ -161,6 +183,11 @@ char** detect_mouse(int *count) {
             // printf("mouse device found:\n%s", line);
             (*count)++;
         }
+        if (line[0] == 'B'){
+            usb = 0;
+            virtual = 0;
+            flag = 0;
+        }
     }
 
     fclose(fp);
@@ -173,7 +200,7 @@ char** detect_mouse(int *count) {
 }
 
 
-char** detect_kbd(int *count) {
+char** detect_all_kbd(int *count) {
     FILE *fp;
     char line[MAX_LINE_LENGTH];
     char path[PATH_MAX];
@@ -188,22 +215,25 @@ char** detect_kbd(int *count) {
 
     // If current device is kbd
     int flag = 0;
-    int is_usb = 0;
+    int usb = 0;
+    int virtual = 0;
 
     // Read line by line
     while (fgets(line, sizeof(line), fp)) {
         // Check if the device is a usb device
         if (line[0] == 'I'){
-            is_usb = strstr(line, "Bus=0003") != NULL;
+            usb = strstr(line, "Bus=0003") != NULL;
         }
         // Check if the device is kbd
         if (line[0] == 'N'){
-            flag = is_kbd(line) && is_usb;
+            flag = is_kbd(line);
+            virtual = is_virtual(line);
         }
         // Find eventX in handler
-        if (line[0] == 'H' && flag) {
+        if (line[0] == 'H' && usb && !virtual && (flag || is_kbd(line))) {
             flag = 0;
-            is_usb = 0;
+            usb = 0;
+            virtual = 0;
             snprintf(path, sizeof(path), "%s%s", INPUT_DIR, get_event_file(line));
             char *end = strchr(path, '\n');
             *(end-1) = '\0';
@@ -217,6 +247,11 @@ char** detect_kbd(int *count) {
             // printf("kbd device found:\n%s", line);
             (*count)++;
         }
+        if (line[0] == 'B'){
+            usb = 0;
+            virtual = 0;
+            flag = 0;
+        }
     }
 
     fclose(fp);
@@ -228,20 +263,45 @@ char** detect_kbd(int *count) {
     return kbd_devices;
 }
 
-
-int main(){
-    int cnt_mouse = 0;
-    int cnt_kbd = 0;
-    char **mouse_devices = detect_mouse(&cnt_mouse);
-    char **kbd_devices = detect_kbd(&cnt_kbd);
-
-    for (int i = 0; i < cnt_mouse; i++) {
-        printf("%s\n", mouse_devices[i]);
-        free(mouse_devices[i]);
+char* detect_kbd(){
+    // 
+    int cnt = 0;
+    char**  ret = detect_all_kbd(&cnt);
+    if (cnt == 0){
+        printf("no usb non-virtual kbd found\n");
+        return "";
     }
-    printf("-------------------\n");
-    for (int i = 0; i < cnt_kbd; i++) {
-        printf("%s\n", kbd_devices[i]);
-        free(kbd_devices[i]);
-    }
+    return ret[0];
 }
+
+char* detect_mouse(){
+    int cnt = 0;
+    char**  ret = detect_all_mouse(&cnt);
+    if (cnt == 0){
+        printf("no usb non-virtual mouse found\n");
+        return "";
+    }
+    return ret[0];
+}
+
+// int main(){
+//     int cnt_mouse = 0;
+//     int cnt_kbd = 0;
+//     char **mouse_devices = detect_all_mouse(&cnt_mouse);
+//     char **kbd_devices = detect_all_kbd(&cnt_kbd);
+
+//     for (int i = 0; i < cnt_mouse; i++) {
+//         printf("%s\n", mouse_devices[i]);
+//         free(mouse_devices[i]);
+//     }
+//     printf("-------------------\n");
+//     for (int i = 0; i < cnt_kbd; i++) {
+//         printf("%s\n", kbd_devices[i]);
+//         free(kbd_devices[i]);
+//     }
+
+//     printf("%s\n", detect_mouse());
+//     printf("-------------\n");
+//     printf("%s\n", detect_kbd());
+//     return 0;
+// }
