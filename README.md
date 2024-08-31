@@ -1,4 +1,7 @@
-#Content of "device_with_hid":
+# 项目使用需要安装的依赖库
+sudo apt install libinput-dev wl-clipboard
+
+# "device_with_hid"目录结构:
 ├── abs_mouse_device.c
 ├── abs_mouse_device.h
 ├── cJSON.c
@@ -17,7 +20,7 @@
 ├── Makefile
 └── send.sh
 
-#Content of "device_without_hid":
+# "device_without_hid"目录结构:
 ├── abs_mouse_device.c
 ├── abs_mouse_device.h
 ├── crypto.c
@@ -27,6 +30,13 @@
 ├── input_server.c
 ├── Makefile
 └── send.sh
+
+# 使用方法
+1.在没有鼠标键盘的设备上运行device_without_hid文件夹中的input_device_server可执行文件
+         sudo -E ./input_device_server（或者直接运行make run）
+2.在有鼠标键盘的设备上运行device_with_hid文件夹中的input_device_shared可执行文件
+        sudo -E ./input_device_shared（或者直接运行make run）
+3.即可享受共享鼠标、键盘、剪切板功能，达成使用一套键盘鼠标控制两台主机效果~
 
 # 赛题及要求
 ## 赛题：基于openKylin的hid input 设备共享协议
