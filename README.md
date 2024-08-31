@@ -2,14 +2,14 @@
 sudo apt install libinput-dev wl-clipboard
 
 # "device_with_hid"目录结构:
-├── abs_mouse_device.c
-├── abs_mouse_device.h
-├── cJSON.c
-├── cJSON.h
-├── config.json
-├── crypto.c
-├── crypto.h
-├── debug_info.h
+├── abs_mouse_device.c  
+├── abs_mouse_device.h  
+├── cJSON.c  
+├── cJSON.h  
+├── config.json  
+├── crypto.c  
+├── crypto.h  
+├── debug_info.h  
 ├── detect_mouse_kbd_event.c
 ├── detect_mouse_kbd_event.h
 ├── get_target_dev_info.c
