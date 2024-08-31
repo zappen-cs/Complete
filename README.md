@@ -30,9 +30,9 @@ sudo apt install libinput-dev wl-clipboard
 └── send.sh  
 ## 使用方法
 1.在没有鼠标键盘的设备上运行device_without_hid文件夹中的input_device_server可执行文件  
-     直接运行make run（或者执行sudo -E ./input_device_server）  
+&emsp;&emsp;直接运行make run（或者执行sudo -E ./input_device_server）  
 2.在有鼠标键盘的设备上运行device_with_hid文件夹中的input_device_shared可执行文件  
-     直接运行make run（或者执行sudo -E ./input_device_shared）  
+&emsp;&emsp;直接运行make run（或者执行sudo -E ./input_device_shared）  
 3.即可享受共享鼠标、键盘、剪切板功能，达成使用一套键盘鼠标控制两台主机效果~
 
 # 赛题及要求
