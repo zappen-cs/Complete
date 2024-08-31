@@ -1,6 +1,5 @@
 # 项目使用需要安装的依赖库
 sudo apt install libinput-dev wl-clipboard
-
 # "device_with_hid"目录结构:
 ├── abs_mouse_device.c  
 ├── abs_mouse_device.h  
@@ -10,32 +9,30 @@ sudo apt install libinput-dev wl-clipboard
 ├── crypto.c  
 ├── crypto.h  
 ├── debug_info.h  
-├── detect_mouse_kbd_event.c
-├── detect_mouse_kbd_event.h
-├── get_target_dev_info.c
-├── get_target_dev_info.h
-├── input_device_shared
-├── input_device_shared.c
-├── input_device_shared.c.bak
-├── Makefile
-└── send.sh
-
+├── detect_mouse_kbd_event.c  
+├── detect_mouse_kbd_event.h  
+├── get_target_dev_info.c  
+├── get_target_dev_info.h  
+├── input_device_shared  
+├── input_device_shared.c  
+├── input_device_shared.c.bak  
+├── Makefile  
+└── send.sh  
 # "device_without_hid"目录结构:
-├── abs_mouse_device.c
-├── abs_mouse_device.h
-├── crypto.c
-├── crypto.h
-├── debug_info.h
-├── input_device_server
-├── input_server.c
-├── Makefile
-└── send.sh
-
+├── abs_mouse_device.c  
+├── abs_mouse_device.h  
+├── crypto.c  
+├── crypto.h  
+├── debug_info.h  
+├── input_device_server  
+├── input_server.c  
+├── Makefile  
+└── send.sh  
 # 使用方法
 1.在没有鼠标键盘的设备上运行device_without_hid文件夹中的input_device_server可执行文件
-         sudo -E ./input_device_server（或者直接运行make run）
+         直接运行make run（或者执行sudo -E ./input_device_server）
 2.在有鼠标键盘的设备上运行device_with_hid文件夹中的input_device_shared可执行文件
-        sudo -E ./input_device_shared（或者直接运行make run）
+        直接运行make run（或者执行sudo -E ./input_device_shared）
 3.即可享受共享鼠标、键盘、剪切板功能，达成使用一套键盘鼠标控制两台主机效果~
 
 # 赛题及要求
