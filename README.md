@@ -2,7 +2,6 @@
 sudo apt install libinput-dev wl-clipboard
 
 # "device_with_hid"目录结构:
-‘’‘
 ├── abs_mouse_device.c
 ├── abs_mouse_device.h
 ├── cJSON.c
@@ -20,7 +19,7 @@ sudo apt install libinput-dev wl-clipboard
 ├── input_device_shared.c.bak
 ├── Makefile
 └── send.sh
-‘’‘
+
 # "device_without_hid"目录结构:
 ├── abs_mouse_device.c
 ├── abs_mouse_device.h
