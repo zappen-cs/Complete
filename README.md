@@ -1,3 +1,33 @@
+#Content of "device_with_hid":
+├── abs_mouse_device.c
+├── abs_mouse_device.h
+├── cJSON.c
+├── cJSON.h
+├── config.json
+├── crypto.c
+├── crypto.h
+├── debug_info.h
+├── detect_mouse_kbd_event.c
+├── detect_mouse_kbd_event.h
+├── get_target_dev_info.c
+├── get_target_dev_info.h
+├── input_device_shared
+├── input_device_shared.c
+├── input_device_shared.c.bak
+├── Makefile
+└── send.sh
+
+#Content of "device_without_hid":
+├── abs_mouse_device.c
+├── abs_mouse_device.h
+├── crypto.c
+├── crypto.h
+├── debug_info.h
+├── input_device_server
+├── input_server.c
+├── Makefile
+└── send.sh
+
 # 赛题及要求
 ## 赛题：基于openKylin的hid input 设备共享协议
 ## (1) 赛题说明：
