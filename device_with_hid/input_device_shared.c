@@ -77,6 +77,7 @@ int epoll_fd = -1;
 struct epoll_event events[20];
 
 double global_x = 960, global_y = 540;
+int mouse_accel = 1;
 double pointer_speed = -2;
 const char key[] = "123";//the decrypt key
 
@@ -114,12 +115,18 @@ static struct libinput_interface interface = {
 static void handle_event(struct libinput_event *event) {
 	if (libinput_event_get_type(event) == LIBINPUT_EVENT_POINTER_MOTION) {
 		struct libinput_event_pointer *pointer_event = libinput_event_get_pointer_event(event);
-		double dx_unacce = libinput_event_pointer_get_dx_unaccelerated(pointer_event);
-		double dy_unacce = libinput_event_pointer_get_dy_unaccelerated(pointer_event);
-		//double dx_acce = libinput_event_pointer_get_dx(pointer_event);
-		//double dy_acce = libinput_event_pointer_get_dy(pointer_event);
+		double dx, dy;
 
-		global_x += dx_unacce * (1 + pointer_speed), global_y += dy_unacce * (1 + pointer_speed);
+		if(mouse_accel == 0){
+			dx = libinput_event_pointer_get_dx_unaccelerated(pointer_event);
+			dy = libinput_event_pointer_get_dy_unaccelerated(pointer_event);
+		}
+		else if(mouse_accel == 1){
+			dx = libinput_event_pointer_get_dx(pointer_event);
+			dy = libinput_event_pointer_get_dy(pointer_event);
+		}
+		
+		global_x += dx * (1 + pointer_speed), global_y += dy * (1 + pointer_speed);
 
 		/* we assume we have two device, dev1 and dev2, 
 		 * their screen is 1920x1080 and their position follow: 
@@ -431,63 +438,100 @@ void *build_socket_connect_thread_func() {
 }
 
 void get_mouse_speed() {
-	/* file_path = "/home/tclab/.config/kcminputrc" */
-	char file_path[32] = "/home/";
-	int file_path_len = strlen(file_path);
+	FILE *fp;
+    char buffer[BUFFER_SIZE];
 
-	char *user_name = getlogin(); // user_name = tclab
-	int user_name_len = strlen(user_name);
-
-	strcpy(file_path + file_path_len, user_name); // file_path = /home/tclab
-	file_path_len += user_name_len; // update file_path_len
-
-	char *file_postfix = "/.config/kcminputrc";
-	int file_postfix_len = strlen(file_postfix);
-
-	strcpy(file_path + file_path_len, file_postfix);
-	file_path_len += file_postfix_len; // update file_path_len
-	file_path[file_path_len] = '\0';
-
-	/* now file_path_len = /home/tclab/.config/kcminputrc */
-	DEBUG_INFO("file_path:%s", file_path);
-
-	FILE *file = fopen(file_path, "r");
-	if (!file) {
-		perror("Failed to open file");
-		return ;
-	}
-
-	char line[100];
-	int device_found = 0;
-	while (fgets(line, sizeof(line), file)) {
-		// Remove newline character
-		line[strcspn(line, "\n")] = 0;
-
-		// Check for the device section
-		if (strstr(line, " Mouse")) { // various mouse have different name, but all of them include " Mouse"
-			device_found = 1;
-			continue;
-		}
-
-		// If device section is found, look for PointerAcceleration
-		if (device_found) {
-			if (strstr(line, "PointerAcceleration")) {
-				char *token = strtok(line, "=");
-				token = strtok(NULL, "=");
-				if (token) {
-					pointer_speed = atof(token);
+    // 根据不同的操作系统类型，执行不同的命令
+	#if defined(__linux__)
+		//检查桌面服务器（X11？Waylnad？）
+		const char* wayland_display = getenv("WAYLAND_DISPLAY");
+		const char* x11_display = getenv("DISPLAY");
+		if(wayland_display != NULL){
+			printf("This is a Wayland!\n");
+			// 检查桌面服务器（UKUI、GNOME等）
+			const char* desktop_env = getenv("XDG_CURRENT_DESKTOP");
+			if (desktop_env == NULL){
+				perror("Failed to get Desktop Environment!\n");
+				exit(1);
+			}
+			// 根据桌面服务器进行不同操作
+			if (strstr(desktop_env, "GNOME") != NULL) {
+				printf("GNOME Desktop Environment\n");
+				fp = popen("gsettings get org.gnome.desktop.peripherals.mouse speed", "r");
+			} 
+			else if (strstr(desktop_env, "UKUI") != NULL) {
+				printf("UKUI Desktop Environment\n");
+				//判断鼠标加速是否开启
+				fp = popen("gsettings get org.ukui.peripherals-mouse mouse-accel", "r");
+					// 读取命令输出
+				if (fgets(buffer, sizeof(buffer)-1, fp) != NULL) {
+					if(strstr(buffer, "true") != NULL){
+						printf("The mouse acceleration is opened!\n");
+						mouse_accel = 1;
+					}
+					else{
+						printf("The mouse acceleration is closed!\n");
+						mouse_accel = 0;
+					}
+				} else {
+					fprintf(stderr, "No output from command.\n");
 				}
-				break;
-			}
-
-			// If we encounter another section, stop searching
-			if (line[0] == '[') {
-				break;
+				if(mouse_accel){//开启鼠标加速的话把速度设置到0
+					// 获取当前用户名
+					const char *username = getlogin();
+					if (username == NULL) {
+						fprintf(stderr, "Error: Unable to get the current username.\n");
+						return;
+					}
+					printf("The username:%s\n",username);
+					// 构建要执行的命令
+					char cmd[256];
+					snprintf(cmd, sizeof(cmd), "su %s -c \"%s\"", username, "gsettings set org.ukui.peripherals-mouse motion-acceleration 4.5");
+					// 执行命令
+					int ret = system(cmd);
+					if (ret == -1) {
+						perror("system");
+					}
+				}
+				//获取鼠标速度
+				fp = popen("gsettings get org.ukui.peripherals-mouse motion-acceleration", "r");
+			} 
+			else {
+				fp = popen("echo 'Unknown desktop-server'", "r");
 			}
 		}
-	}
-	fclose(file);
+		else if(x11_display != NULL){
+			printf("This is a X11!\n");
+			exit(0);//暂时未作处理
+		}
+		
+		
+	#elif defined(_WIN32) || defined(_WIN64)
+		// Windows 系统
+		fp = popen("ver", "r");
+	#elif defined(__APPLE__) || defined(__MACH__)
+		// macOS 系统
+		fp = popen("sw_vers", "r");
+	#else
+		// 其他系统
+		fp = popen("echo 'Unsupported OS'", "r");
+	#endif
+
+		// 读取命令输出
+    if (fgets(buffer, sizeof(buffer)-1, fp) != NULL) {
+        // 将字符串转换为浮点数
+        pointer_speed = atof(buffer);
+		pointer_speed = 0.285714*pointer_speed -1.285714;//线性回归出来的
+		if(pointer_speed >= 1){
+			pointer_speed = 1;//openkylin上面特殊处理
+		}
+		printf("The speed:%f\n", pointer_speed);
+    } else {
+        fprintf(stderr, "No output from command.\n");
+    }
+	pclose(fp);
 }
+
 
 void *set_mouse_positon_func() {
 	/* set mouse's absolute position in screen*/
