@@ -461,7 +461,7 @@ void get_mouse_speed() {
     if (fgets(buffer, sizeof(buffer)-1, fp) != NULL) {
         // 将字符串转换为浮点数
         pointer_speed = atof(buffer);
-		pointer_speed = 0.285714*pointer_speed -1.285714;//线性回归出来的
+		//pointer_speed = 0.285714*pointer_speed -1.285714;//线性回归出来的
 		if(pointer_speed >= 1){
 			pointer_speed = 1;//openkylin上面特殊处理
 		}

@@ -17,7 +17,8 @@ int is_mouse_device(const char *device) {
     // Filter by events
     int fd = open(device, O_RDONLY);
     if (fd < 0) {
-        perror("Failed to open device");
+        printf("%d, Failed to open device", __LINE__);
+        //perror("Failed to open device");
         return 0;
     }
 
@@ -65,7 +66,7 @@ int is_kbd_device(const char *device) {
     // Filter by events
     int fd = open(device, O_RDONLY);
     if (fd < 0) {
-        perror("Failed to open device");
+        printf("%d,Failed to open device%s\n", __LINE__,  device);
         return 0;
     }
 
@@ -133,7 +134,7 @@ int is_kbd(const char *device_info) {
 
 
 char* get_event_file(const char *device_info){
-    return strstr(device_info, "event");
+	return strstr(device_info, "event");
 }
 
 
@@ -171,8 +172,13 @@ char** detect_all_mouse(int *count) {
             usb = 0;
             virtual = 0;
             snprintf(path, sizeof(path), "%s%s", INPUT_DIR, get_event_file(line));
-            char *end = strchr(path, '\n');
-            *(end-1) = '\0';
+            char *end = strchr(path, ' ');
+			if (end == NULL) {
+				end = strchr(path, '\n');
+				*(end-1) = '\0';
+			} else {
+				*(end) = '\0';
+			}
             if(!is_mouse_device(path)){
                 continue;
             }
@@ -235,8 +241,13 @@ char** detect_all_kbd(int *count) {
             usb = 0;
             virtual = 0;
             snprintf(path, sizeof(path), "%s%s", INPUT_DIR, get_event_file(line));
-            char *end = strchr(path, '\n');
-            *(end-1) = '\0';
+            char *end = strchr(path, ' ');
+			if (end == NULL) {
+            	end = strchr(path, '\n');
+            	*(end-1) = '\0';
+			} else {
+            	*(end) = '\0';
+			}
             if(!is_kbd_device(path)){
                 continue;
             }
@@ -284,24 +295,26 @@ char* detect_mouse(){
     return ret[0];
 }
 
-// int main(){
-//     int cnt_mouse = 0;
-//     int cnt_kbd = 0;
-//     char **mouse_devices = detect_all_mouse(&cnt_mouse);
-//     char **kbd_devices = detect_all_kbd(&cnt_kbd);
+#if 0
+int main(){
+ int cnt_mouse = 0;
+ int cnt_kbd = 0;
+ char **mouse_devices = detect_all_mouse(&cnt_mouse);
+ char **kbd_devices = detect_all_kbd(&cnt_kbd);
 
-//     for (int i = 0; i < cnt_mouse; i++) {
-//         printf("%s\n", mouse_devices[i]);
-//         free(mouse_devices[i]);
-//     }
-//     printf("-------------------\n");
-//     for (int i = 0; i < cnt_kbd; i++) {
-//         printf("%s\n", kbd_devices[i]);
-//         free(kbd_devices[i]);
-//     }
+ for (int i = 0; i < cnt_mouse; i++) {
+	 printf("%s\n", mouse_devices[i]);
+	 free(mouse_devices[i]);
+ }
+ printf("-------------------\n");
+ for (int i = 0; i < cnt_kbd; i++) {
+	 printf("%s\n", kbd_devices[i]);
+	 free(kbd_devices[i]);
+ }
 
-//     printf("%s\n", detect_mouse());
-//     printf("-------------\n");
-//     printf("%s\n", detect_kbd());
-//     return 0;
-// }
+ printf("%s\n", detect_mouse());
+ printf("-------------\n");
+ printf("%s\n", detect_kbd());
+ return 0;
+}
+#endif

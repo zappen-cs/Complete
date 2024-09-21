@@ -457,7 +457,15 @@ void get_mouse_speed() {
 			// 根据桌面服务器进行不同操作
 			if (strstr(desktop_env, "GNOME") != NULL) {
 				printf("GNOME Desktop Environment\n");
+				char cmd[256];
+				snprintf(cmd, sizeof(cmd), "su %s -c \"%s\"", "tclab", "gsettings set org.gnome.desktop.peripherals.mouse speed 0");
+				// 执行命令
+				int ret = system(cmd);
+				if (ret == -1) {
+					perror("system");
+				}
 				fp = popen("gsettings get org.gnome.desktop.peripherals.mouse speed", "r");
+
 			} 
 			else if (strstr(desktop_env, "UKUI") != NULL) {
 				printf("UKUI Desktop Environment\n");
@@ -521,7 +529,7 @@ void get_mouse_speed() {
     if (fgets(buffer, sizeof(buffer)-1, fp) != NULL) {
         // 将字符串转换为浮点数
         pointer_speed = atof(buffer);
-		pointer_speed = 0.285714*pointer_speed -1.285714;//线性回归出来的
+		//pointer_speed = 0.285714*pointer_speed -1.285714;//线性回归出来的
 		if(pointer_speed >= 1){
 			pointer_speed = 1;//openkylin上面特殊处理
 		}
