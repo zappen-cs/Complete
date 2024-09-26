@@ -35,6 +35,7 @@
 #include "abs_mouse_device.h"
 #include "debug_info.h"
 #include "crypto.h"
+#include "get_resolution.h"
 
 #define SERVER_PORT 0x1024
 
@@ -43,7 +44,12 @@
 #define KBD_EVENT 0x1234561
 #define MOUSE_EVENT 0x1234562
 
-#define ENABLE_COLIPBOARD 1
+#define DEVICE_SEAT_UP 0x1234566
+#define DEVICE_SEAT_DOWN 0x1234567
+#define DEVICE_SEAT_LEFT 0x1234568
+#define DEVICE_SEAT_RIGHT 0x1234569
+
+#define ENABLE_COLIPBOARD 0
 #if ENABLE_COLIPBOARD
 #define CLIPBOARD_EVENT 0x1234563
 
@@ -60,6 +66,7 @@ typedef struct {
 
 struct mouse_kbd_event {
 	int type;
+	int sit;
 	union {
 		struct input_event ev;
 		mouse_positon pos;
@@ -75,13 +82,12 @@ static int vir_input_fd;
 static int server_sock_fd;
 static int client_sock_fd;
 
-#if 0
-void print_event(struct input_event ev) {
-	printf("type:%d\t code:%d\t value:%d\n\n", ev.type, ev.code, ev.value);
-}
-#endif
+int g_device_seat;
+int g_screen_width;
+int g_screen_height;
 
-double global_x = 960, global_y = 540;
+
+double global_x, global_y;
 double pointer_speed = -2;
 int mouse_accel = 1;
 
@@ -126,27 +132,39 @@ static void handle_event(struct libinput_event *event) {
 		 *        |                    |   |                    |
 		 *        |____________________|   |____________________|
 		 */
-		if (global_x <= 0) {
+		if (global_x < 0) {
 			DEBUG_INFO("Mouse reached the left boundary");
 			global_x = 0;
-			struct mouse_kbd_event mke;
-			memset(&mke, 0, sizeof(mke));
-			mke.type = SET_MOUSE_POSITION;
-			mke.pos.x = 1920;
-			mke.pos.y = global_y;
-			send(client_sock_fd, &mke, sizeof(mke), 0);
+			if (g_device_seat == DEVICE_SEAT_RIGHT) {
+				struct mouse_kbd_event mke;
+				memset(&mke, 0, sizeof(mke));
+				mke.type = SET_MOUSE_POSITION;
+				//mke.pos.x = 1920;
+				mke.pos.x = g_screen_width;
+				mke.pos.y = global_y / g_screen_height;
+				send(client_sock_fd, &mke, sizeof(mke), 0);
+			}
 		}
-		if (global_x >= 1920) {
+		if (global_x >= g_screen_width) {
 			DEBUG_INFO("Mouse reached the right boundary");
-			global_x = 1920;
+			//global_x = 1920;
+			global_x = g_screen_width;
+			if (g_device_seat == DEVICE_SEAT_LEFT) {
+				struct mouse_kbd_event mke;
+				memset(&mke, 0, sizeof(mke));
+				mke.type = SET_MOUSE_POSITION;
+				mke.pos.x = 0;
+				mke.pos.y = global_y / g_screen_height;
+				send(client_sock_fd, &mke, sizeof(mke), 0);
+			}
 		}
 		if (global_y <= 0) {
 			DEBUG_INFO("Mouse reached the top boundary");
 			global_y = 0;
 		}
-		if (global_y >= 1080) {
+		if (global_y >= g_screen_height) {
 			DEBUG_INFO("Mouse reached the bottom boundary");
-			global_y = 1080;
+			global_y = g_screen_height;
 		}
     }
 }
@@ -211,7 +229,7 @@ void *set_mouse_positon_func() {
 	/* set mouse's absolute position in screen*/
 	create_abs_mouse();
 	usleep(100000);
-	global_x = 0, global_y = 540;
+	global_x = 0, global_y = g_screen_height >> 1;
 	set_mouse_position(global_x, global_y);
 	//ioctl(abs_mouse_fd, UI_DEV_DESTROY);
 	//close(abs_mouse_fd);
@@ -321,10 +339,23 @@ void *process_event_thread_func() {
 					printf("Failed to receive event\n");
 				}
 			} else {
-				//print_event(event);
 				if (mke.type == SET_MOUSE_POSITION) {
-					global_x = mke.pos.x;
-					global_y = mke.pos.y;
+					g_device_seat = mke.sit;
+					if (g_device_seat == DEVICE_SEAT_UP) {
+						global_x = mke.pos.x * g_screen_width;
+						global_y = g_screen_height;
+					} else if (g_device_seat == DEVICE_SEAT_DOWN) {
+						global_x = mke.pos.x * g_screen_width;
+						global_y = 0;
+					} else if (g_device_seat == DEVICE_SEAT_LEFT) {
+						global_x = g_screen_width;
+						global_y = mke.pos.y * g_screen_height;
+					} else if (g_device_seat == DEVICE_SEAT_RIGHT) {
+						global_x = 0;
+						global_y = mke.pos.y * g_screen_height;
+					}
+					//global_x = mke.pos.x;
+					//global_y = mke.pos.y;
 					set_mouse_position(global_x, global_y);
 				} else if (mke.type == MOUSE_EVENT) {
 					report_event(mke.ev.type, mke.ev.code, mke.ev.value);
@@ -354,6 +385,15 @@ void init_socket() {
 	int ret;
 	/* 1.创建服务器socket，用于监听请求 */
 	server_sock_fd = socket(AF_INET, SOCK_STREAM, 0);
+	if (server_sock_fd < 0) {
+		perror("Failed to create server_sock_fd");
+	}
+
+	int on = 1;
+	ret = setsockopt(server_sock_fd, SOL_SOCKET, SO_REUSEADDR, &on, sizeof(on));
+	if (ret < 0) {
+		perror("Failed to setsockopt");
+	}
 
 	/* 2.创建sockaddr_in结构体变量 */
 	struct sockaddr_in server_addr;
@@ -379,7 +419,7 @@ void init_socket() {
 
 void get_mouse_speed() {
 	FILE *fp;
-    char buffer[BUFFER_SIZE];
+    char buffer[1024];
 
     // 根据不同的操作系统类型，执行不同的命令
 	#if defined(__linux__)
@@ -483,6 +523,10 @@ int main() {
 	
 	init_socket();
 
+	// TODO: 动态改变分辨率
+	g_screen_width = 1920;
+	g_screen_height = 1080;
+	get_resolution(&g_screen_width, &g_screen_height);
 	/* create a thread to process the event come from client */
 	pthread_t process_event_thread;
 	ret = pthread_create(&process_event_thread, NULL, process_event_thread_func, NULL);

@@ -1,6 +1,6 @@
 {
-	"up-device-ip": "xxx",
-	"down-device-ip": "yyyy",
+	"up-device-ip": "192.168.12.100",
+	"down-device-ip": "192.168.12.101",
 	"left-device-ip": "192.168.12.241",
-	"right-device-ip": "192.168.12.241"
+	"right-device-ip": "256.256.256.256"
 }

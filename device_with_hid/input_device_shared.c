@@ -29,11 +29,16 @@
 #include <errno.h>
 #include <sys/epoll.h>
 #include <sys/wait.h>
+#include <sys/inotify.h>
+#include "get_resolution.h"
+
+#define INOTIFY_EVENT_NUM  12
 
 #include "detect_mouse_kbd_event.h"
 #include "abs_mouse_device.h"
 #include "debug_info.h"
 #include "get_target_dev_info.h"
+#include "base.h"
 #include "crypto.h"
 
 #define SERVER_PORT 0x1024
@@ -43,9 +48,20 @@
 #define MOUSE_EVENT 0x1234562
 #define CLIPBOARD_EVENT 0x1234563
 
+#define DEVICE_SEAT_UP 0x1234566
+#define DEVICE_SEAT_DOWN 0x1234567
+#define DEVICE_SEAT_LEFT 0x1234568
+#define DEVICE_SEAT_RIGHT 0x1234569
+
+#define DEVICE_ID_UP 0x1234571
+#define DEVICE_ID_DOWN 0x1234572
+#define DEVICE_ID_LEFT 0x1234573
+#define DEVICE_ID_RIGHT 0x1234574
+#define DEVICE_ID_LOCAL 0x1234575
+
 #define BUFFER_SIZE 1024
 
-#define ENABLE_CLIPBOARD 1
+#define ENABLE_CLIPBOARD 0
 
 #if ENABLE_CLIPBOARD
 uint8_t recv_buf[BUFFER_SIZE];
@@ -60,6 +76,7 @@ typedef struct {
 
 struct mouse_kbd_event {
 	int type;
+	int sit; // 0 -- up, 1 -- down, 2 -- left, 3 -- right
 	union {
 		struct input_event ev;
 		mouse_positon pos;
@@ -69,19 +86,47 @@ struct mouse_kbd_event {
 	};
 };
 
-extern char right_dev_ip[IPLEN];
 
-static int client_sock_fd;
-int device_id = 0;
+
+extern char right_dev_ip[IPLEN];
+extern char left_dev_ip[IPLEN];
+extern int left_dev_enable;
+extern int right_dev_enable;
+extern int up_dev_enable;
+extern int down_dev_enable;
+
+extern int up_dev_closed;
+extern int down_dev_closed;
+extern int left_dev_closed;
+extern int right_dev_closed;
+
+extern struct servant_device config_infos[4];
+
+//static int client_sock_fd;
+
+#define DEVICE_COUNT 6
+struct servant_device servant_devices[DEVICE_COUNT];
+struct devices_layout cur_devices_layout;
+
+int g_screen_width;
+int g_screen_height;
+int g_device_id = DEVICE_ID_LOCAL;
 int epoll_fd = -1;
 struct epoll_event events[20];
 
-double global_x = 960, global_y = 540;
+double global_x, global_y;
 int mouse_accel = 1;
 double pointer_speed = -2;
 const char key[] = "123";//the decrypt key
 
-
+static int get_free_index() {
+	for (int i = 0; i < DEVICE_COUNT; i++) {
+		if (servant_devices[i].flag == 0) {
+			return i;
+		}
+	}
+	return -1;
+}
 #if ENABLE_CLIPBOARD
 void copy_to_clipboard(const char *content) {
 	char command[1024];
@@ -128,65 +173,110 @@ static void handle_event(struct libinput_event *event) {
 		
 		global_x += dx * (1 + pointer_speed), global_y += dy * (1 + pointer_speed);
 
-		/* we assume we have two device, dev1 and dev2, 
-		 * their screen is 1920x1080 and their position follow: 
-		 *         ____________________     ____________________
-		 *  	  |					   |   |					|
-		 *		  |                    |   |                    |
-		 *        |        dev1        |   |        dev2        |
-		 *        |                    |   |                    |
-		 *        |____________________|   |____________________|
+		/* we assume we have three PC, PC1, PC2 and PC3, 
+		 * their screen's resolution is 1920x1080 and their layout follow: 
+		 *         ____________________     ____________________    ____________________ 
+		 *  	  |					   |   |					|  |					|
+		 *		  |                    |   |                    |  |                    |
+		 *        |        PC1         |   |        PC2         |  |        PC3         |
+		 *        |                    |   |                    |  |                    |
+		 *        |____________________|   |____________________|  |____________________|
+		 *
+		 *  in these devices, only PC2 owns hid input device.
 		 */
 		if (global_x <= 0) {
 			DEBUG_INFO("Mouse reached the left boundary");
 			global_x = 0;
-		}
-		if (global_x >= 1920) {
-			DEBUG_INFO("Mouse reached the right boundary");
-			global_x = 1920;
-			struct mouse_kbd_event mke;
-			memset(&mke, 0, sizeof(mke));
-			mke.type = SET_MOUSE_POSITION;
-			mke.pos.x = 0;
-			mke.pos.y = global_y;
-			send(client_sock_fd, &mke, sizeof(mke), 0);
-			device_id = 1;
-			// block until receive the mouse event from dev2
-			while (1) {
+			if (cur_devices_layout.left && cur_devices_layout.left->enable) {
+				struct mouse_kbd_event mke;
 				memset(&mke, 0, sizeof(mke));
-				recv(client_sock_fd, &mke, sizeof(mke), 0);
-				if (mke.type == SET_MOUSE_POSITION) {
-					global_y = mke.pos.y;
-					global_x = mke.pos.x;
-					set_mouse_position(global_x, global_y);
-					device_id = 0;
-					break;
+				mke.type = SET_MOUSE_POSITION;
+				mke.sit = DEVICE_SEAT_LEFT;
+				//mke.pos.x = 1920;
+				mke.pos.x = g_screen_width;
+				mke.pos.y = global_y / g_screen_height;
+				send(cur_devices_layout.left->sock_fd, &mke, sizeof(mke), 0);
+				g_device_id = DEVICE_ID_LEFT;
+				// block until receive the mouse event from dev1
+				while (1) {
+					memset(&mke, 0, sizeof(mke));
+					recv(cur_devices_layout.left->sock_fd, &mke, sizeof(mke), 0);
+					if (mke.type == SET_MOUSE_POSITION) {
+						global_x = 0;
+						global_y = mke.pos.y * g_screen_height;
+						set_mouse_position(global_x, global_y);
+						g_device_id = DEVICE_ID_LOCAL;
+						break;
 #if ENABLE_CLIPBOARD
-				} else if (mke.type == CLIPBOARD_EVENT) {
-					// copy content to clipboard
-					if (strcmp(clipboard_content, mke.data) == 0) 
-						continue;
-					//decrypt the message
-					xor_encrypt_decrypt(mke.data, strlen(mke.data), key, strlen(key));
-					//
-					printf("Received message '%s' from client\n", mke.data);
-					strcpy(clipboard_content, mke.data);
-					copy_to_clipboard((const char*)clipboard_content);
-					printf("Now the content of clipboard is '%s'\n", clipboard_content);
-				}
+					} else if (mke.type == CLIPBOARD_EVENT) {
+						// copy content to clipboard
+						if (strcmp(clipboard_content, mke.data) == 0) 
+							continue;
+						//decrypt the message
+						xor_encrypt_decrypt(mke.data, strlen(mke.data), key, strlen(key));
+						//
+						printf("Received message '%s' from client\n", mke.data);
+						strcpy(clipboard_content, mke.data);
+						copy_to_clipboard((const char*)clipboard_content);
+						printf("Now the content of clipboard is '%s'\n", clipboard_content);
+					}
 #else
-				}
-#endif
-			}
+					} // end else if
+#endif 
+				} // end while 
+
+			} // end if (right_dev_enable) 
 		}
+		if (global_x > g_screen_width) {
+			DEBUG_INFO("Mouse reached the right boundary");
+			global_x = g_screen_width;
+			if (cur_devices_layout.right && cur_devices_layout.right->enable) {
+				struct mouse_kbd_event mke;
+				memset(&mke, 0, sizeof(mke));
+				mke.type = SET_MOUSE_POSITION;
+				mke.sit = DEVICE_SEAT_RIGHT;
+				mke.pos.x = 0;
+				mke.pos.y = global_y / g_screen_height;
+				send(cur_devices_layout.right->sock_fd, &mke, sizeof(mke), 0);
+				g_device_id = DEVICE_ID_RIGHT;
+				// block until receive the mouse event from dev2
+				while (1) {
+					memset(&mke, 0, sizeof(mke));
+					recv(cur_devices_layout.right->sock_fd, &mke, sizeof(mke), 0);
+					if (mke.type == SET_MOUSE_POSITION) {
+						global_x = g_screen_width;
+						global_y = mke.pos.y * g_screen_height;
+						set_mouse_position(global_x, global_y);
+						g_device_id = DEVICE_ID_LOCAL;
+						break;
+#if ENABLE_CLIPBOARD
+					} else if (mke.type == CLIPBOARD_EVENT) {
+						// copy content to clipboard
+						if (strcmp(clipboard_content, mke.data) == 0) 
+							continue;
+						//decrypt the message
+						xor_encrypt_decrypt(mke.data, strlen(mke.data), key, strlen(key));
+						//
+						printf("Received message '%s' from client\n", mke.data);
+						strcpy(clipboard_content, mke.data);
+						copy_to_clipboard((const char*)clipboard_content);
+						printf("Now the content of clipboard is '%s'\n", clipboard_content);
+					}
+#else
+					} // end else if
+#endif 
+				} // end while 
+
+			} // end if (right_dev_enable) 
+		} // end if (global_x >= 1920)
 		if (global_y <= 0) {
 			DEBUG_INFO("Mouse reached the top boundary");
 			global_y = 0;
 
 		}
-		if (global_y >= 1080) {
+		if (global_y >= g_screen_height) {
 			DEBUG_INFO("Mouse reached the bottom boundary");
-			global_y = 1080;
+			global_y = g_screen_height;
 		}
 	}
 }
@@ -253,8 +343,6 @@ static struct uinput_user_dev vir_input_dev;
 static int vir_input_fd;
 static int mouse_fd;
 static int kbd_fd;
-#define MOUSE_DEV_PATH "/dev/input/event5"
-#define KBD_DEV_PATH "/dev/input/event6"
 static char *kbd_dev_path;
 static char *mouse_dev_path;
 
@@ -322,7 +410,6 @@ static int report_event(unsigned int type, unsigned int code, unsigned int value
 
 void *send_event_thread_func() {
 	int ret = 0;
-	/* 1.创建虚拟输入设�?? */
 	ret = creat_vir_input_device();
 	if(ret < 0){
 		printf("%s:%d\n", __func__, __LINE__);
@@ -331,36 +418,34 @@ void *send_event_thread_func() {
 
 	while(epoll_fd < 0); // block until epoll_fd has been created
 
-	// 读取到的input设�?�数�?
 	struct input_event event;
 	while (1) {
 		int event_num = epoll_wait(epoll_fd, events, 20, -1);
 		for (int i = 0; i < event_num; i++) {
 			ret = read(events[i].data.fd, &event, sizeof(event));
 			if (ret == sizeof(event)) {
-				if (device_id == 0) {
+				if (g_device_id == DEVICE_ID_LOCAL) {
 					report_event(event.type, event.code, event.value);
-				} else if (device_id == 1) {
+				} else {
 					struct mouse_kbd_event mke;
 					memset(&mke, 0, sizeof(mke));
 					mke.type = MOUSE_EVENT;
 					mke.ev = event;
-					send(client_sock_fd, &mke, sizeof(mke), 0);
+					if (g_device_id == DEVICE_ID_UP) {
+						send(cur_devices_layout.up->sock_fd, &mke, sizeof(mke), 0);
+					} else if (g_device_id == DEVICE_ID_DOWN) {
+						send(cur_devices_layout.down->sock_fd, &mke, sizeof(mke), 0);
+					} else if (g_device_id == DEVICE_ID_LEFT) {
+						send(cur_devices_layout.left->sock_fd, &mke, sizeof(mke), 0);
+					} else {
+						send(cur_devices_layout.right->sock_fd, &mke, sizeof(mke), 0);
+					}
 				}
 			}
 
 		}
 	}
 	return NULL;
-}
-int add_to_epoll(int fd) {
-	int ret;
-	struct epoll_event e_ev;
-	memset(&e_ev, 0, sizeof(e_ev));
-	e_ev.events = EPOLLIN; // we are interested in coming
-	e_ev.data.fd = fd;
-	ret = epoll_ctl(epoll_fd, EPOLL_CTL_ADD, fd, &e_ev);
-	return ret;
 }
 void get_dev_file_path() {
 	int cnt_mouse;
@@ -381,6 +466,38 @@ void get_dev_file_path() {
 	}
 	DEBUG_INFO("kbd_dev_path:%s", kbd_dev_path);
 }
+int add_to_epoll(int fd) {
+	int ret;
+	struct epoll_event e_ev;
+	memset(&e_ev, 0, sizeof(e_ev));
+	e_ev.events = EPOLLIN; // we are interested in coming
+	e_ev.data.fd = fd;
+	ret = epoll_ctl(epoll_fd, EPOLL_CTL_ADD, fd, &e_ev);
+	return ret;
+}
+
+void add_kbd_mouse_to_epollfd() {
+	int ret;
+	mouse_fd = open(mouse_dev_path, O_RDONLY);
+	if (mouse_fd <= 0) {
+		printf("open %s device error!\n", mouse_dev_path);
+	}
+	kbd_fd = open(kbd_dev_path, O_RDONLY);
+	if (kbd_fd < 0) {
+		perror("open %s device error!\n");
+	}
+	// add mouse_fd and kbd_fd into epoll_fd
+	ret = add_to_epoll(mouse_fd);
+	if (ret < 0) {
+		perror("failed to add mouse_fd");
+	}
+	ret = add_to_epoll(kbd_fd);
+	if (ret < 0) {
+		perror("failed to add kbd_fd");
+	}
+}
+
+#if 0
 void *init_epoll_thread_func() {
 	int ret;
 	epoll_fd = epoll_create1(0);
@@ -409,8 +526,10 @@ void *init_epoll_thread_func() {
 	}
 	return NULL;
 }
+#endif
 
-void *build_socket_connect_thread_func() {
+#if 0
+void *build_socket_connected_thread_func() {
 	int ret;
 	struct sockaddr_in server_addr;
 	/* 创建客户�?套接�? */
@@ -436,6 +555,7 @@ void *build_socket_connect_thread_func() {
 	DEBUG_INFO("connect to another successfully\n");
 	return NULL;
 }
+#endif
 
 void get_mouse_speed() {
 	FILE *fp;
@@ -540,12 +660,222 @@ void get_mouse_speed() {
 	pclose(fp);
 }
 
+const char *event_str[INOTIFY_EVENT_NUM] = {
+	"IN_ACCESS",
+	"IN_MODIFY",
+	"IN_ATTRIB",
+	"IN_CLOSE_WRITE",
+	"IN_CLOSE_NOWRITE",
+	"IN_OPEN",
+	"IN_MOVED_FROM",
+	"IN_MOVED_TO",
+	"IN_CREATE",
+	"IN_DELETE",
+	"IN_DELETE_SELF",
+	"IN_MOVE_SELF"
+};
+
+void printf_devices_layout(struct devices_layout layout) {
+	if (layout.up) {
+		printf("up device ip is %s, sockfd is %d, enable: %d\n", layout.up->ip, layout.up->sock_fd, layout.up->enable);
+	}
+	if (layout.down) {
+		printf("down device ip is %s, sockfd is %d, enable: %d\n", layout.down->ip, layout.down->sock_fd, layout.down->enable);
+	}
+	if (layout.left) {
+		printf("left device ip is %s, sockfd is %d, enable: %d\n", layout.left->ip, layout.left->sock_fd, layout.left->enable);
+	}
+	if (layout.right) {
+		printf("right device ip is %s, sockfd is %d, enable: %d\n", layout.right->ip, layout.right->sock_fd, layout.right->enable);
+	}
+}
+void connect_to_server(int *fd, char *ip) {
+	int ret;
+	struct sockaddr_in server_addr;
+	*fd = socket(AF_INET, SOCK_STREAM, 0);
+	if (*fd < 0) {
+		perror("Failed to create socket");
+		exit(EXIT_FAILURE);
+	}
+
+	/* 设置服务器地址信息 */
+	memset(&server_addr, 0, sizeof(server_addr));
+
+	server_addr.sin_family = AF_INET;
+	server_addr.sin_addr.s_addr = inet_addr(ip);
+	server_addr.sin_port = htons(SERVER_PORT);
+
+	ret = connect(*fd, (struct sockaddr*)&server_addr, sizeof(server_addr));
+	if (ret < 0) {
+		perror("failed to connect to the server");
+		exit(EXIT_FAILURE);
+	}
+	DEBUG_INFO("connect to another successfully\n");
+}
+
+void update_layout(int servant_device_index, char *pos) {
+	if (strcmp(pos, "up") == 0) {
+		cur_devices_layout.up = &servant_devices[servant_device_index];
+	} else if (strcmp(pos, "down") == 0) {
+		cur_devices_layout.down = &servant_devices[servant_device_index];
+	} else if (strcmp(pos, "left") == 0) {
+		cur_devices_layout.left = &servant_devices[servant_device_index];
+	} else {
+		cur_devices_layout.right = &servant_devices[servant_device_index];
+	}
+}
+int find_device_info_by_ip(char *ip, char *pos) {
+	for (int i = 0; i < DEVICE_COUNT; i++) {
+		if (servant_devices[i].flag && strcmp(servant_devices[i].ip, ip) == 0) {
+			update_layout(i, pos);
+			return 0;
+		}
+	}
+	return -1;
+}
+void update_status() {
+	// 将当前布局的上下左右指针置为空
+	cur_devices_layout.up = NULL;
+	cur_devices_layout.down = NULL;
+	cur_devices_layout.left = NULL;
+	cur_devices_layout.right = NULL;
+	// 1.get info of config.json
+	//get_info();
+	char **device_ip_list = NULL;
+	char **device_pos_list = NULL;
+	int device_num = 0;
+	char **device_removed_list = NULL;
+	int device_removed_num = 0;
+	get_servant_devices_info(&device_ip_list, &device_pos_list, &device_num, &device_removed_list, &device_removed_num);
+	// 
+	printf("device_num : %d\n", device_num);
+	for (int i = 0; i < device_num; i++) {
+		char *ip = device_ip_list[i];
+		char *pos = device_pos_list[i];
+		printf("ip:%s, pos:%s\n", ip, pos);
+		int res = find_device_info_by_ip(ip, pos);
+		if (res == -1) {
+			// 没找到
+			printf("no found\n");
+			int idx = get_free_index();
+			servant_devices[idx].flag = 1;
+			strcpy(servant_devices[idx].ip, ip);
+			connect_to_server(&servant_devices[idx].sock_fd, ip);
+			servant_devices[idx].enable = 1;
+			update_layout(idx, pos);
+		}
+	}
+	for (int i = 0; i < device_removed_num; i++) {
+		char *ip = device_removed_list[i];
+		// update array of servant_devices
+		for (int i = 0; i < DEVICE_COUNT; i++) {
+			if (servant_devices[i].flag && strcmp(servant_devices[i].ip, ip) == 0) {
+				servant_devices[i].flag = 0;
+				close(servant_devices[i].sock_fd);
+				servant_devices[i].sock_fd = -1;
+				servant_devices[i].enable = 0;
+				break;
+			}
+		}
+	}
+	for (int i = 0; i < device_num; i++) {
+		free(device_ip_list[i]);
+		free(device_pos_list[i]);
+	}
+	for (int i = 0; i < device_removed_num; i++) {
+		free(device_removed_list[i]);
+	}
+	free(device_ip_list);
+	free(device_pos_list);
+	free(device_removed_list);
+}
+
+int watch_config_handler() {
+	int errTimes = 0;
+	int fd = -1;
+
+	fd = inotify_init();
+	if (fd < 0) {
+		fprintf(stderr, "inotify_init failed\n");
+		printf("Error no.%d: %s\n", errno, strerror(errno));
+		goto INOTIFY_FAIL;
+	}
+
+	int wd = -1;
+	struct inotify_event *event;
+	int length;
+	int nread;
+	char buf[BUFSIZ];
+	int i = 0;
+	buf[sizeof(buf) - 1] = 0;
+INOTIFY_AGAIN:
+	wd = inotify_add_watch(fd, "config.json", IN_ALL_EVENTS);
+	if (wd < 0) {
+		fprintf(stderr, "inotify_add_watch  failed\n");
+
+		printf("Error no.%d: %s\n", errno, strerror(errno));
+
+		if(errTimes < 3) {
+			goto INOTIFY_AGAIN;
+		}
+		else {
+			goto INOTIFY_FAIL;
+		}
+	}
+	length = read(fd, buf, sizeof(buf) - 1);
+	nread = 0;
+	// inotify 事件发生时
+	while(length > 0) {
+		//printf("\n");
+		event = (struct inotify_event *)&buf[nread];
+		// 遍历所有事件
+		for(i = 0; i< INOTIFY_EVENT_NUM; i++)
+		{
+			// 判断事件是否发生
+			if( (event->mask >> i) & 1 )
+			{
+				// 该监控项为目录或目录下的文件时
+				if(event->len > 0)
+				{
+					fprintf(stdout, "%s --- %s\n", event->name, event_str[i]);
+				}
+				// 该监控项为文件时
+				else if(event->len == 0) {
+					if (strcmp(event_str[i], "IN_MODIFY") == 0) {
+						printf("watch config.json is modified\n");
+						update_status();
+						printf_devices_layout(cur_devices_layout);
+					}
+				}
+			}
+		}
+
+		nread = nread + sizeof(struct inotify_event) + event->len;
+
+		length = length - sizeof(struct inotify_event) - event->len;
+	}
+
+	goto INOTIFY_AGAIN;
+
+	close(fd);
+
+	return 0;
+
+INOTIFY_FAIL:
+	return -1;
+}
+
+void *watch_config_thread_func() {
+	watch_config_handler();
+	return NULL;
+}
 
 void *set_mouse_positon_func() {
 	/* set mouse's absolute position in screen*/
 	create_abs_mouse();
-	usleep(100000);
-	global_x = 960, global_y = 540;
+	usleep(1000000);
+	//global_x = 960, global_y = 540;
+	global_x = g_screen_width >> 1, global_y = g_screen_height >> 1;
 	set_mouse_position(global_x, global_y);
 	//ioctl(abs_mouse_fd, UI_DEV_DESTROY);
 	//close(abs_mouse_fd);
@@ -570,9 +900,19 @@ void Get_CtrlC_handler(int sig) {
 }
 
 int main() {
-	get_dev_file_path();
-	signal(SIGINT, Get_CtrlC_handler);
 	int ret;
+	signal(SIGINT, Get_CtrlC_handler);
+
+
+	// TODO: 鼠标键盘热插拔
+	get_dev_file_path();
+
+	// TODO: 分辨率动态检测
+	g_screen_width = 1920;
+	g_screen_height = 1080;
+	get_resolution(&g_screen_width, &g_screen_height);
+	global_x = g_screen_width >> 1;
+	global_y = g_screen_height >> 1;
 
 	/* setting mouse position need to sleep 10ms so we create a thread to reduce the effect to main thread */
 	pthread_t set_position_thread;
@@ -584,29 +924,45 @@ int main() {
 		DEBUG_INFO("Failed to create thread");
 	}
 
-	/* get config info, such as server ip */
-	get_info();
-	DEBUG_INFO("right device ip : %s", right_dev_ip);
+	//  watch config.json  and update the layout of PCs
+	pthread_t watch_config_thread;
+	ret = pthread_create(&watch_config_thread, NULL, watch_config_thread_func, NULL);
+	if (ret == 0) {
+		DEBUG_INFO("create watch_config_thread successfully");
+	} else {
+		DEBUG_INFO("Failed to create watch_config_thread");
+	}
 
+	// TODO: 动态更新鼠标速度
 	/* get mouse's speed */
 	get_mouse_speed();
 
-	/* create a thread to build connection with another device */
-	pthread_t build_socket_connect_thread;
-	ret = pthread_create(&build_socket_connect_thread, NULL, build_socket_connect_thread_func, NULL);
-	if (ret == 0) {
-		DEBUG_INFO("create build_socket_connect_thread successfully");
+	// init epoll
+	epoll_fd = epoll_create1(0);
+	if (epoll_fd < 0) {
+		DEBUG_INFO("Failed to create epoll");
 	} else {
-		DEBUG_INFO("Failed to create build_socket_connect_thread");
+		printf("create epoll successfully\n");
 	}
-	/* create a thread to init epoll */
-	pthread_t init_epoll_thread;
-	ret = pthread_create(&init_epoll_thread, NULL, init_epoll_thread_func, NULL);
-	if (ret == 0) {
-		DEBUG_INFO("create init_epoll_thread successfully");
-	} else {
-		DEBUG_INFO("Failed to create init_epoll_thread");
-	}
+	/* add keyboard and mouse into epollfd */
+	add_kbd_mouse_to_epollfd();
+	///* create a thread to init epoll */
+	//pthread_t init_epoll_thread;
+	//ret = pthread_create(&init_epoll_thread, NULL, init_epoll_thread_func, NULL);
+	//if (ret == 0) {
+	//	DEBUG_INFO("create init_epoll_thread successfully");
+	//} else {
+	//	DEBUG_INFO("Failed to create init_epoll_thread");
+	//}
+
+	///* create a thread to wait for another PC to connect */
+	//pthread_t build_socket_connected_thread;
+	//ret = pthread_create(&build_socket_connected_thread, NULL, build_socket_connected_thread_func, NULL);
+	//if (ret == 0) {
+	//	DEBUG_INFO("create build_socket_connected_thread successfully");
+	//} else {
+	//	DEBUG_INFO("Failed to create build_socketed_connect_thread");
+	//}
 	/* create a thread to send keyboard and mouse event */
 	pthread_t send_event_thread;
 	ret = pthread_create(&send_event_thread, NULL, send_event_thread_func, NULL);
@@ -618,9 +974,9 @@ int main() {
 	pthread_t watch_mouse_thread;
 	ret = pthread_create(&watch_mouse_thread, NULL, watch_mouse_thread_func, NULL);
 	if (ret == 0) {
-		DEBUG_INFO("create send_event_thread successfully");
+		DEBUG_INFO("create watch_mouse_thread successfully");
 	} else {
-		DEBUG_INFO("Failed to create send_event_thread");
+		DEBUG_INFO("Failed to create watch_mouse_thread");
 	}
 #if ENABLE_CLIPBOARD
 	/* a thread to listen the content of clipboard */
@@ -633,7 +989,7 @@ int main() {
 	}
 #endif 
 
-	/* deactivate mouse and keyboard */
+	///* deactivate mouse and keyboard */
 	char* mouse_cmd = calloc(10086, sizeof(char));
 	char* kbd_cmd = calloc(10086, sizeof(char));
 	sprintf(mouse_cmd, "sudo udevadm trigger --action=remove %s", mouse_dev_path);
@@ -641,17 +997,25 @@ int main() {
 	system(mouse_cmd);
 	system(kbd_cmd);
 
-	free(mouse_cmd);
-	free(kbd_cmd);
+	//free(mouse_cmd);
+	//free(kbd_cmd);
 
 	pthread_join(set_position_thread, NULL);
-	pthread_join(build_socket_connect_thread, NULL);
-	pthread_join(init_epoll_thread, NULL);
+	pthread_join(watch_config_thread, NULL);
+	//pthread_join(build_socket_connected_thread, NULL);
+	//pthread_join(init_epoll_thread, NULL);
 	pthread_join(send_event_thread, NULL);
 	pthread_join(watch_mouse_thread, NULL);
 #if ENABLE_CLIPBOARD
 	pthread_join(listen_clipboard_thread, NULL);
 #endif
+	// 防止程序非ctrl + c 退出, 键盘鼠标不可用
+	sprintf(mouse_cmd, "sudo udevadm trigger --action=add %s", mouse_dev_path);
+	sprintf(kbd_cmd, "sudo udevadm trigger --action=add %s", kbd_dev_path);
+	system(mouse_cmd);
+	system(kbd_cmd);
+	free(mouse_cmd);
+	free(kbd_cmd);
 	return 0;
 }
 
