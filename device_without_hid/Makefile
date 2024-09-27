@@ -12,11 +12,11 @@ SRCS = abs_mouse_device.c \
 	  
 	 
 
-TARGET = input_device_server
+TARGET = input_device_server.so
 
 all: $(TARGET)
 $(TARGET): $(SRCS)
-	$(CC) $(CFLAGS) $(INCLUDES) $(SRCS) -o $(TARGET) $(LDFLAGS)
+	$(CC) --shared -fpic $(CFLAGS) $(INCLUDES) $(SRCS) -o ../$(TARGET) $(LDFLAGS)
 
 run:
 	sudo -E ./$(TARGET)

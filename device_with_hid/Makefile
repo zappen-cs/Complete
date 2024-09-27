@@ -12,11 +12,11 @@ SRCS = abs_mouse_device.c \
 	   get_resolution.c \
 
 
-TARGET = input_device_shared
+TARGET = input_device_shared.so
 
 all: $(TARGET)
 $(TARGET): $(SRCS)
-	$(CC) $(CFLAGS) $(INCLUDES) $(SRCS) -o $(TARGET) $(LDFLAGS)
+	$(CC) --shared -fpic $(CFLAGS) $(INCLUDES) $(SRCS) -o ../$(TARGET) $(LDFLAGS)
 
 run:
 	sudo -E ./$(TARGET)

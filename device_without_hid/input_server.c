@@ -161,10 +161,26 @@ static void handle_event(struct libinput_event *event) {
 		if (global_y <= 0) {
 			DEBUG_INFO("Mouse reached the top boundary");
 			global_y = 0;
+			if (g_device_seat == DEVICE_SEAT_DOWN) {
+				struct mouse_kbd_event mke;
+				memset(&mke, 0, sizeof(mke));
+				mke.type = SET_MOUSE_POSITION;
+				mke.pos.x = global_x / g_screen_width;
+				mke.pos.y = g_screen_height;
+				send(client_sock_fd, &mke, sizeof(mke), 0);
+			}
 		}
 		if (global_y >= g_screen_height) {
 			DEBUG_INFO("Mouse reached the bottom boundary");
 			global_y = g_screen_height;
+			if (g_device_seat == DEVICE_SEAT_UP) {
+				struct mouse_kbd_event mke;
+				memset(&mke, 0, sizeof(mke));
+				mke.type = SET_MOUSE_POSITION;
+				mke.pos.x = global_x / g_screen_width;
+				mke.pos.y = 0;
+				send(client_sock_fd, &mke, sizeof(mke), 0);
+			}
 		}
     }
 }

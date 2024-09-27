@@ -272,11 +272,87 @@ static void handle_event(struct libinput_event *event) {
 		if (global_y <= 0) {
 			DEBUG_INFO("Mouse reached the top boundary");
 			global_y = 0;
+			if (cur_devices_layout.up && cur_devices_layout.up->enable) {
+				struct mouse_kbd_event mke;
+				memset(&mke, 0, sizeof(mke));
+				mke.type = SET_MOUSE_POSITION;
+				mke.sit = DEVICE_SEAT_UP;
+				mke.pos.x = global_x / g_screen_width;
+				mke.pos.y = 0;
+				send(cur_devices_layout.up->sock_fd, &mke, sizeof(mke), 0);
+				g_device_id = DEVICE_ID_UP;
+
+				while (1) {
+					memset(&mke, 0, sizeof(mke));
+					recv(cur_devices_layout.up->sock_fd, &mke, sizeof(mke), 0);
+					if (mke.type == SET_MOUSE_POSITION) {
+						global_x = mke.pos.x * g_screen_width;
+						global_y = 0;
+						set_mouse_position(global_x, global_y);
+						g_device_id = DEVICE_ID_LOCAL;
+						break;
+#if ENABLE_CLIPBOARD
+					} else if (mke.type == CLIPBOARD_EVENT) {
+						// copy content to clipboard
+						if (strcmp(clipboard_content, mke.data) == 0) 
+							continue;
+						//decrypt the message
+						xor_encrypt_decrypt(mke.data, strlen(mke.data), key, strlen(key));
+						//
+						printf("Received message '%s' from client\n", mke.data);
+						strcpy(clipboard_content, mke.data);
+						copy_to_clipboard((const char*)clipboard_content);
+						printf("Now the content of clipboard is '%s'\n", clipboard_content);
+					}
+#else
+					} // end else if
+#endif 
+				} // end while 
+
+			} // end if (right_dev_enable) 
 
 		}
 		if (global_y >= g_screen_height) {
 			DEBUG_INFO("Mouse reached the bottom boundary");
 			global_y = g_screen_height;
+			if (cur_devices_layout.down && cur_devices_layout.down->enable) {
+				struct mouse_kbd_event mke;
+				memset(&mke, 0, sizeof(mke));
+				mke.type = SET_MOUSE_POSITION;
+				mke.sit = DEVICE_SEAT_DOWN;
+				mke.pos.x = global_x / g_screen_width;
+				mke.pos.y = 0;
+				send(cur_devices_layout.down->sock_fd, &mke, sizeof(mke), 0);
+				g_device_id = DEVICE_ID_DOWN;
+
+				while (1) {
+					memset(&mke, 0, sizeof(mke));
+					recv(cur_devices_layout.down->sock_fd, &mke, sizeof(mke), 0);
+					if (mke.type == SET_MOUSE_POSITION) {
+						global_x = mke.pos.x * g_screen_width;
+						global_y = 0;
+						set_mouse_position(global_x, global_y);
+						g_device_id = DEVICE_ID_LOCAL;
+						break;
+#if ENABLE_CLIPBOARD
+					} else if (mke.type == CLIPBOARD_EVENT) {
+						// copy content to clipboard
+						if (strcmp(clipboard_content, mke.data) == 0) 
+							continue;
+						//decrypt the message
+						xor_encrypt_decrypt(mke.data, strlen(mke.data), key, strlen(key));
+						//
+						printf("Received message '%s' from client\n", mke.data);
+						strcpy(clipboard_content, mke.data);
+						copy_to_clipboard((const char*)clipboard_content);
+						printf("Now the content of clipboard is '%s'\n", clipboard_content);
+					}
+#else
+					} // end else if
+#endif 
+				} // end while 
+
+			} // end if (right_dev_enable) 
 		}
 	}
 }
