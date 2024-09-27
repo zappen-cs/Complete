@@ -449,6 +449,21 @@ void get_mouse_speed() {
 			// 根据桌面服务器进行不同操作
 			if (strstr(desktop_env, "GNOME") != NULL) {
 				printf("GNOME Desktop Environment\n");
+				// 获取当前用户名
+				const char *username = getlogin();
+				if (username == NULL) {
+					fprintf(stderr, "Error: Unable to get the current username.\n");
+					return;
+				}
+				printf("The username:%s\n",username);
+				// 构建要执行的命令
+				char cmd[256];
+				snprintf(cmd, sizeof(cmd), "su %s -c \"%s\"", username, "gsettings set org.gnome.desktop.peripherals.mouse speed 0");
+				// 执行命令
+				int ret = system(cmd);
+				if (ret == -1) {
+					perror("system");
+				}
 				fp = popen("gsettings get org.gnome.desktop.peripherals.mouse speed", "r");
 				// 读取命令输出
 				if (fgets(buffer, sizeof(buffer)-1, fp) != NULL) {
