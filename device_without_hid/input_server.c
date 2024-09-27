@@ -147,7 +147,6 @@ static void handle_event(struct libinput_event *event) {
 		}
 		if (global_x >= g_screen_width) {
 			DEBUG_INFO("Mouse reached the right boundary");
-			//global_x = 1920;
 			global_x = g_screen_width;
 			if (g_device_seat == DEVICE_SEAT_LEFT) {
 				struct mouse_kbd_event mke;
@@ -244,8 +243,8 @@ void *watch_mouse_thread_func() {
 void *set_mouse_positon_func() {
 	/* set mouse's absolute position in screen*/
 	create_abs_mouse();
-	usleep(100000);
-	global_x = 0, global_y = g_screen_height >> 1;
+	usleep(1000000);
+	global_x = g_screen_width / 2, global_y = g_screen_height / 2;
 	set_mouse_position(global_x, global_y);
 	//ioctl(abs_mouse_fd, UI_DEV_DESTROY);
 	//close(abs_mouse_fd);
@@ -342,7 +341,6 @@ void *process_event_thread_func() {
 		socklen_t clnt_addr_len = sizeof(clnt_addr);
 		client_sock_fd = accept(server_sock_fd, (struct sockaddr*)&clnt_addr, &clnt_addr_len);
 
-
 		while (1) {
 			memset(&mke, 0, sizeof(mke));
 			ret = recv(client_sock_fd, &mke, sizeof(mke), 0);
@@ -370,8 +368,6 @@ void *process_event_thread_func() {
 						global_x = 0;
 						global_y = mke.pos.y * g_screen_height;
 					}
-					//global_x = mke.pos.x;
-					//global_y = mke.pos.y;
 					set_mouse_position(global_x, global_y);
 				} else if (mke.type == MOUSE_EVENT) {
 					report_event(mke.ev.type, mke.ev.code, mke.ev.value);
@@ -454,8 +450,19 @@ void get_mouse_speed() {
 			if (strstr(desktop_env, "GNOME") != NULL) {
 				printf("GNOME Desktop Environment\n");
 				fp = popen("gsettings get org.gnome.desktop.peripherals.mouse speed", "r");
-			} 
-			else if (strstr(desktop_env, "UKUI") != NULL) {
+				// 读取命令输出
+				if (fgets(buffer, sizeof(buffer)-1, fp) != NULL) {
+					// 将字符串转换为浮点数
+					pointer_speed = atof(buffer);
+					if(pointer_speed >= 1){
+						pointer_speed = 1;//openkylin上面特殊处理
+					}
+					printf("The speed:%f\n", pointer_speed);
+				} else {
+					fprintf(stderr, "No output from command.\n");
+				}
+				pclose(fp);
+			} else if (strstr(desktop_env, "UKUI") != NULL) {
 				printf("UKUI Desktop Environment\n");
 				//判断鼠标加速是否开启
 				fp = popen("gsettings get org.ukui.peripherals-mouse mouse-accel", "r");
@@ -491,6 +498,19 @@ void get_mouse_speed() {
 				}
 				//获取鼠标速度
 				fp = popen("gsettings get org.ukui.peripherals-mouse motion-acceleration", "r");
+				// 读取命令输出
+				if (fgets(buffer, sizeof(buffer)-1, fp) != NULL) {
+					// 将字符串转换为浮点数
+					pointer_speed = atof(buffer);
+					pointer_speed = 0.285714*pointer_speed -1.285714;//线性回归出来的
+					if(pointer_speed >= 1){
+						pointer_speed = 1;//openkylin上面特殊处理
+					}
+					printf("The speed:%f\n", pointer_speed);
+				} else {
+					fprintf(stderr, "No output from command.\n");
+				}
+				pclose(fp);
 			} 
 			else {
 				fp = popen("echo 'Unknown desktop-server'", "r");
@@ -513,19 +533,6 @@ void get_mouse_speed() {
 		fp = popen("echo 'Unsupported OS'", "r");
 	#endif
 
-		// 读取命令输出
-    if (fgets(buffer, sizeof(buffer)-1, fp) != NULL) {
-        // 将字符串转换为浮点数
-        pointer_speed = atof(buffer);
-		//pointer_speed = 0.285714*pointer_speed -1.285714;//线性回归出来的
-		if(pointer_speed >= 1){
-			pointer_speed = 1;//openkylin上面特殊处理
-		}
-		printf("The speed:%f\n", pointer_speed);
-    } else {
-        fprintf(stderr, "No output from command.\n");
-    }
-	pclose(fp);
 }
 
 int main() {

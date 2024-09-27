@@ -76,7 +76,7 @@ typedef struct {
 
 struct mouse_kbd_event {
 	int type;
-	int sit; // 0 -- up, 1 -- down, 2 -- left, 3 -- right
+	int sit;  // 告诉从设备，从设备位于主设备的方位信息
 	union {
 		struct input_event ev;
 		mouse_positon pos;
@@ -86,23 +86,6 @@ struct mouse_kbd_event {
 	};
 };
 
-
-
-extern char right_dev_ip[IPLEN];
-extern char left_dev_ip[IPLEN];
-extern int left_dev_enable;
-extern int right_dev_enable;
-extern int up_dev_enable;
-extern int down_dev_enable;
-
-extern int up_dev_closed;
-extern int down_dev_closed;
-extern int left_dev_closed;
-extern int right_dev_closed;
-
-extern struct servant_device config_infos[4];
-
-//static int client_sock_fd;
 
 #define DEVICE_COUNT 6
 struct servant_device servant_devices[DEVICE_COUNT];
@@ -187,17 +170,16 @@ static void handle_event(struct libinput_event *event) {
 		if (global_x <= 0) {
 			DEBUG_INFO("Mouse reached the left boundary");
 			global_x = 0;
-			if (cur_devices_layout.left && cur_devices_layout.left->enable) {
+			if (cur_devices_layout.left) {
 				struct mouse_kbd_event mke;
 				memset(&mke, 0, sizeof(mke));
 				mke.type = SET_MOUSE_POSITION;
 				mke.sit = DEVICE_SEAT_LEFT;
-				//mke.pos.x = 1920;
 				mke.pos.x = g_screen_width;
 				mke.pos.y = global_y / g_screen_height;
 				send(cur_devices_layout.left->sock_fd, &mke, sizeof(mke), 0);
 				g_device_id = DEVICE_ID_LEFT;
-				// block until receive the mouse event from dev1
+				// block until receive the mouse event from other PC
 				while (1) {
 					memset(&mke, 0, sizeof(mke));
 					recv(cur_devices_layout.left->sock_fd, &mke, sizeof(mke), 0);
@@ -230,7 +212,7 @@ static void handle_event(struct libinput_event *event) {
 		if (global_x > g_screen_width) {
 			DEBUG_INFO("Mouse reached the right boundary");
 			global_x = g_screen_width;
-			if (cur_devices_layout.right && cur_devices_layout.right->enable) {
+			if (cur_devices_layout.right) {
 				struct mouse_kbd_event mke;
 				memset(&mke, 0, sizeof(mke));
 				mke.type = SET_MOUSE_POSITION;
@@ -272,7 +254,7 @@ static void handle_event(struct libinput_event *event) {
 		if (global_y <= 0) {
 			DEBUG_INFO("Mouse reached the top boundary");
 			global_y = 0;
-			if (cur_devices_layout.up && cur_devices_layout.up->enable) {
+			if (cur_devices_layout.up) {
 				struct mouse_kbd_event mke;
 				memset(&mke, 0, sizeof(mke));
 				mke.type = SET_MOUSE_POSITION;
@@ -315,7 +297,7 @@ static void handle_event(struct libinput_event *event) {
 		if (global_y >= g_screen_height) {
 			DEBUG_INFO("Mouse reached the bottom boundary");
 			global_y = g_screen_height;
-			if (cur_devices_layout.down && cur_devices_layout.down->enable) {
+			if (cur_devices_layout.down) {
 				struct mouse_kbd_event mke;
 				memset(&mke, 0, sizeof(mke));
 				mke.type = SET_MOUSE_POSITION;
@@ -523,6 +505,7 @@ void *send_event_thread_func() {
 	}
 	return NULL;
 }
+
 void get_dev_file_path() {
 	int cnt_mouse;
 	int cnt_kbd;
@@ -542,6 +525,7 @@ void get_dev_file_path() {
 	}
 	DEBUG_INFO("kbd_dev_path:%s", kbd_dev_path);
 }
+
 int add_to_epoll(int fd) {
 	int ret;
 	struct epoll_event e_ev;
@@ -573,69 +557,9 @@ void add_kbd_mouse_to_epollfd() {
 	}
 }
 
-#if 0
-void *init_epoll_thread_func() {
-	int ret;
-	epoll_fd = epoll_create1(0);
-	if (epoll_fd < 0) {
-		perror("Failedto create epoll_fd");
-		return NULL;
-	}
-	mouse_fd = open(mouse_dev_path, O_RDONLY);
-	if (mouse_fd <= 0) {
-		printf("open %s device error!\n", mouse_dev_path);
-		return NULL;
-	}
-	kbd_fd = open(kbd_dev_path, O_RDONLY);
-	if (kbd_fd < 0) {
-		perror("open %s device error!\n");
-		return NULL;
-	}
-	// add mouse_fd and kbd_fd into epoll_fd
-	ret = add_to_epoll(mouse_fd);
-	if (ret < 0) {
-		perror("failed to add mouse_fd");
-	}
-	ret = add_to_epoll(kbd_fd);
-	if (ret < 0) {
-		perror("failed to add kbd_fd");
-	}
-	return NULL;
-}
-#endif
-
-#if 0
-void *build_socket_connected_thread_func() {
-	int ret;
-	struct sockaddr_in server_addr;
-	/* 创建客户�?套接�? */
-	client_sock_fd = socket(AF_INET, SOCK_STREAM, 0);
-	if (client_sock_fd < 0) {
-		perror("Failed to create socket");
-		exit(EXIT_FAILURE);
-	}
-
-	/* 设置服务器地址信息 */
-	memset(&server_addr, 0, sizeof(server_addr));
-
-	server_addr.sin_family = AF_INET;
-	server_addr.sin_addr.s_addr = inet_addr(right_dev_ip);
-	server_addr.sin_port = htons(SERVER_PORT);
-
-	/* 建立连接 */
-	ret = connect(client_sock_fd, (struct sockaddr*)&server_addr, sizeof(server_addr));
-	if (ret < 0) {
-		perror("failed to connect to the server");
-		exit(EXIT_FAILURE);
-	}
-	DEBUG_INFO("connect to another successfully\n");
-	return NULL;
-}
-#endif
-
 void get_mouse_speed() {
 	FILE *fp;
-    char buffer[BUFFER_SIZE];
+    char buffer[1024];
 
     // 根据不同的操作系统类型，执行不同的命令
 	#if defined(__linux__)
@@ -661,9 +585,19 @@ void get_mouse_speed() {
 					perror("system");
 				}
 				fp = popen("gsettings get org.gnome.desktop.peripherals.mouse speed", "r");
+				if (fgets(buffer, sizeof(buffer)-1, fp) != NULL) {
+					// 将字符串转换为浮点数
+					pointer_speed = atof(buffer);
+					if(pointer_speed >= 1){
+						pointer_speed = 1;//openkylin上面特殊处理
+					}
+					printf("The ubuntu pointer speed:%f\n", pointer_speed);
+				} else {
+					fprintf(stderr, "No output from command.\n");
+				}
+				pclose(fp);
 
-			} 
-			else if (strstr(desktop_env, "UKUI") != NULL) {
+			} else if (strstr(desktop_env, "UKUI") != NULL) {
 				printf("UKUI Desktop Environment\n");
 				//判断鼠标加速是否开启
 				fp = popen("gsettings get org.ukui.peripherals-mouse mouse-accel", "r");
@@ -699,8 +633,20 @@ void get_mouse_speed() {
 				}
 				//获取鼠标速度
 				fp = popen("gsettings get org.ukui.peripherals-mouse motion-acceleration", "r");
-			} 
-			else {
+				if (fgets(buffer, sizeof(buffer)-1, fp) != NULL) {
+					// 将字符串转换为浮点数
+					pointer_speed = atof(buffer);
+					pointer_speed = 0.285714*pointer_speed -1.285714;//线性回归出来的
+					if(pointer_speed >= 1){
+						pointer_speed = 1;//openkylin上面特殊处理
+					}
+					printf("The openkylin pointer speed:%f\n", pointer_speed);
+				} else {
+					fprintf(stderr, "No output from command.\n");
+				}
+				pclose(fp);
+
+			} else {
 				fp = popen("echo 'Unknown desktop-server'", "r");
 			}
 		}
@@ -708,6 +654,7 @@ void get_mouse_speed() {
 			printf("This is a X11!\n");
 			exit(0);//暂时未作处理
 		}
+		// 读取命令输出
 		
 		
 	#elif defined(_WIN32) || defined(_WIN64)
@@ -721,19 +668,6 @@ void get_mouse_speed() {
 		fp = popen("echo 'Unsupported OS'", "r");
 	#endif
 
-		// 读取命令输出
-    if (fgets(buffer, sizeof(buffer)-1, fp) != NULL) {
-        // 将字符串转换为浮点数
-        pointer_speed = atof(buffer);
-		//pointer_speed = 0.285714*pointer_speed -1.285714;//线性回归出来的
-		if(pointer_speed >= 1){
-			pointer_speed = 1;//openkylin上面特殊处理
-		}
-		printf("The speed:%f\n", pointer_speed);
-    } else {
-        fprintf(stderr, "No output from command.\n");
-    }
-	pclose(fp);
 }
 
 const char *event_str[INOTIFY_EVENT_NUM] = {
@@ -753,16 +687,16 @@ const char *event_str[INOTIFY_EVENT_NUM] = {
 
 void printf_devices_layout(struct devices_layout layout) {
 	if (layout.up) {
-		printf("up device ip is %s, sockfd is %d, enable: %d\n", layout.up->ip, layout.up->sock_fd, layout.up->enable);
+		printf("up device ip is %s, sockfd is %d\n", layout.up->ip, layout.up->sock_fd);
 	}
 	if (layout.down) {
-		printf("down device ip is %s, sockfd is %d, enable: %d\n", layout.down->ip, layout.down->sock_fd, layout.down->enable);
+		printf("down device ip is %s, sockfd is %d\n", layout.down->ip, layout.down->sock_fd);
 	}
 	if (layout.left) {
-		printf("left device ip is %s, sockfd is %d, enable: %d\n", layout.left->ip, layout.left->sock_fd, layout.left->enable);
+		printf("left device ip is %s, sockfd is %d\n", layout.left->ip, layout.left->sock_fd);
 	}
 	if (layout.right) {
-		printf("right device ip is %s, sockfd is %d, enable: %d\n", layout.right->ip, layout.right->sock_fd, layout.right->enable);
+		printf("right device ip is %s, sockfd is %d\n", layout.right->ip, layout.right->sock_fd);
 	}
 }
 void connect_to_server(int *fd, char *ip) {
@@ -816,19 +750,16 @@ void update_status() {
 	cur_devices_layout.left = NULL;
 	cur_devices_layout.right = NULL;
 	// 1.get info of config.json
-	//get_info();
 	char **device_ip_list = NULL;
 	char **device_pos_list = NULL;
 	int device_num = 0;
 	char **device_removed_list = NULL;
 	int device_removed_num = 0;
 	get_servant_devices_info(&device_ip_list, &device_pos_list, &device_num, &device_removed_list, &device_removed_num);
-	// 
-	printf("device_num : %d\n", device_num);
+
 	for (int i = 0; i < device_num; i++) {
 		char *ip = device_ip_list[i];
 		char *pos = device_pos_list[i];
-		printf("ip:%s, pos:%s\n", ip, pos);
 		int res = find_device_info_by_ip(ip, pos);
 		if (res == -1) {
 			// 没找到
@@ -837,7 +768,6 @@ void update_status() {
 			servant_devices[idx].flag = 1;
 			strcpy(servant_devices[idx].ip, ip);
 			connect_to_server(&servant_devices[idx].sock_fd, ip);
-			servant_devices[idx].enable = 1;
 			update_layout(idx, pos);
 		}
 	}
@@ -849,7 +779,6 @@ void update_status() {
 				servant_devices[i].flag = 0;
 				close(servant_devices[i].sock_fd);
 				servant_devices[i].sock_fd = -1;
-				servant_devices[i].enable = 0;
 				break;
 			}
 		}
@@ -951,7 +880,7 @@ void *set_mouse_positon_func() {
 	create_abs_mouse();
 	usleep(1000000);
 	//global_x = 960, global_y = 540;
-	global_x = g_screen_width >> 1, global_y = g_screen_height >> 1;
+	global_x = g_screen_width / 2, global_y = g_screen_height / 2 ;
 	set_mouse_position(global_x, global_y);
 	//ioctl(abs_mouse_fd, UI_DEV_DESTROY);
 	//close(abs_mouse_fd);
@@ -984,11 +913,11 @@ int main() {
 	get_dev_file_path();
 
 	// TODO: 分辨率动态检测
-	g_screen_width = 1920;
-	g_screen_height = 1080;
+	g_screen_width = 0;
+	g_screen_height = 0;
 	get_resolution(&g_screen_width, &g_screen_height);
-	global_x = g_screen_width >> 1;
-	global_y = g_screen_height >> 1;
+	//global_x = g_screen_width >> 1;
+	//global_y = g_screen_height >> 1;
 
 	/* setting mouse position need to sleep 10ms so we create a thread to reduce the effect to main thread */
 	pthread_t set_position_thread;
@@ -1022,23 +951,6 @@ int main() {
 	}
 	/* add keyboard and mouse into epollfd */
 	add_kbd_mouse_to_epollfd();
-	///* create a thread to init epoll */
-	//pthread_t init_epoll_thread;
-	//ret = pthread_create(&init_epoll_thread, NULL, init_epoll_thread_func, NULL);
-	//if (ret == 0) {
-	//	DEBUG_INFO("create init_epoll_thread successfully");
-	//} else {
-	//	DEBUG_INFO("Failed to create init_epoll_thread");
-	//}
-
-	///* create a thread to wait for another PC to connect */
-	//pthread_t build_socket_connected_thread;
-	//ret = pthread_create(&build_socket_connected_thread, NULL, build_socket_connected_thread_func, NULL);
-	//if (ret == 0) {
-	//	DEBUG_INFO("create build_socket_connected_thread successfully");
-	//} else {
-	//	DEBUG_INFO("Failed to create build_socketed_connect_thread");
-	//}
 	/* create a thread to send keyboard and mouse event */
 	pthread_t send_event_thread;
 	ret = pthread_create(&send_event_thread, NULL, send_event_thread_func, NULL);
@@ -1073,13 +985,9 @@ int main() {
 	system(mouse_cmd);
 	system(kbd_cmd);
 
-	//free(mouse_cmd);
-	//free(kbd_cmd);
 
 	pthread_join(set_position_thread, NULL);
 	pthread_join(watch_config_thread, NULL);
-	//pthread_join(build_socket_connected_thread, NULL);
-	//pthread_join(init_epoll_thread, NULL);
 	pthread_join(send_event_thread, NULL);
 	pthread_join(watch_mouse_thread, NULL);
 #if ENABLE_CLIPBOARD
