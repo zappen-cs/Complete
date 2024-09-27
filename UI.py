@@ -13,7 +13,7 @@ from PyQt5.QtWidgets import *
 from PyQt5.QtCore import *
 from PyQt5.QtGui import *
 # 一些全局参数
-load_so = 0
+load_so = 1
 GRID_NUM = 3  # 最好是奇数
 GRID_SIZE_H = 90  # 每个网格高度的像素大小
 GRID_SIZE_W = 160  # 每个网格高度的像素大小
@@ -232,9 +232,9 @@ class MasterControl(QWidget):
         self.button()
         if load_so:
             # 加载动态库
-            print("create a new thread")
-            self.thr = StartThread("./input_device_server.so")
-            self.thr.run()
+            print("create a new thread to load .so")
+            self.thr = StartThread("././input_device_shared.so")
+            self.thr.start()
 
     def set_config(self):
         """加载配置文件，如果不存在则创建默认配置"""
@@ -441,9 +441,9 @@ class Servant(QWidget):
         self.initUI()
         if load_so:
             # 加载动态库并运行
-            print("create a new thread")
+            print("create a new thread to load .so")
             self.thr = StartThread("./input_device_server.so")
-            self.thr.run()
+            self.thr.start()
     def initUI(self):
         self.start_client_thread()  # 开启使用端线程
 
