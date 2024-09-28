@@ -924,6 +924,7 @@ int main() {
 	g_screen_width = 0;
 	g_screen_height = 0;
 	get_resolution(&g_screen_width, &g_screen_height);
+	printf("cur screen is %dx%d\n", g_screen_width, g_screen_height);
 	//global_x = g_screen_width >> 1;
 	//global_y = g_screen_height >> 1;
 

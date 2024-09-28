@@ -233,7 +233,7 @@ class MasterControl(QWidget):
         if load_so:
             # 加载动态库
             print("create a new thread to load .so")
-            self.thr = StartThread("././input_device_shared.so")
+            self.thr = StartThread("./input_device_shared.so")
             self.thr.start()
 
     def set_config(self):

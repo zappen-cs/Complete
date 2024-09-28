@@ -244,7 +244,7 @@ void *set_mouse_positon_func() {
 	/* set mouse's absolute position in screen*/
 	create_abs_mouse();
 	usleep(1000000);
-	global_x = g_screen_width / 2, global_y = g_screen_height / 2;
+	//global_x = g_screen_width / 2, global_y = g_screen_height / 2;
 	set_mouse_position(global_x, global_y);
 	//ioctl(abs_mouse_fd, UI_DEV_DESTROY);
 	//close(abs_mouse_fd);
