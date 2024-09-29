@@ -550,8 +550,18 @@ void get_mouse_speed() {
 
 }
 
+void Get_CtrlC_handler(int sig) {
+	signal(sig, SIG_IGN);
+
+	printf("捕捉到Ctrl-C\n");
+
+
+	exit(0);
+}
+
 int main() {
 	int ret = 0;
+	signal(SIGINT, Get_CtrlC_handler);
 	ret = creat_vir_input_device();
 	get_mouse_speed();
 	if (ret < 0) {

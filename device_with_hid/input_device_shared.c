@@ -94,6 +94,7 @@ struct devices_layout cur_devices_layout;
 int g_screen_width;
 int g_screen_height;
 int g_device_id = DEVICE_ID_LOCAL;
+
 int epoll_fd = -1;
 struct epoll_event events[20];
 
@@ -477,6 +478,7 @@ void *send_event_thread_func() {
 	while(epoll_fd < 0); // block until epoll_fd has been created
 
 	struct input_event event;
+	int failed_times = 0;
 	while (1) {
 		int event_num = epoll_wait(epoll_fd, events, 20, -1);
 		for (int i = 0; i < event_num; i++) {
@@ -489,14 +491,55 @@ void *send_event_thread_func() {
 					memset(&mke, 0, sizeof(mke));
 					mke.type = MOUSE_EVENT;
 					mke.ev = event;
+					int cur_sockfd;
 					if (g_device_id == DEVICE_ID_UP) {
-						send(cur_devices_layout.up->sock_fd, &mke, sizeof(mke), 0);
+						if (cur_devices_layout.up) {
+							ret = send(cur_devices_layout.up->sock_fd, &mke, sizeof(mke), 0);
+							if (ret <= 0) {
+								failed_times++;
+								if (failed_times == 3) {
+									failed_times = 0;
+									g_device_id = DEVICE_ID_LOCAL;
+								}
+							}
+						}
+
 					} else if (g_device_id == DEVICE_ID_DOWN) {
-						send(cur_devices_layout.down->sock_fd, &mke, sizeof(mke), 0);
+						if (cur_devices_layout.down) {
+							ret = send(cur_devices_layout.down->sock_fd, &mke, sizeof(mke), 0);
+							if (ret <= 0) {
+								failed_times++;
+								if (failed_times == 3) {
+									failed_times = 0;
+									g_device_id = DEVICE_ID_LOCAL;
+								}
+							}
+						}
 					} else if (g_device_id == DEVICE_ID_LEFT) {
-						send(cur_devices_layout.left->sock_fd, &mke, sizeof(mke), 0);
+						if (cur_devices_layout.left) {
+							ret = send(cur_devices_layout.left->sock_fd, &mke, sizeof(mke), 0);
+							if (ret <= 0) {
+								failed_times++;
+								if (failed_times == 3) {
+									failed_times = 0;
+									g_device_id = DEVICE_ID_LOCAL;
+								}
+							}
+						}
 					} else {
-						send(cur_devices_layout.right->sock_fd, &mke, sizeof(mke), 0);
+						if (cur_devices_layout.right) {
+							cur_sockfd = cur_devices_layout.right->sock_fd;
+							ret = send(cur_sockfd, &mke, sizeof(mke), 0);
+							if (ret <= 0) {
+								//printf("Failed to send\n");
+								failed_times++;
+								if (failed_times == 3) {
+									failed_times = 0;
+									g_device_id = DEVICE_ID_LOCAL;
+								}
+							}
+
+						}
 					}
 				}
 			}
@@ -806,7 +849,7 @@ void update_status() {
 int watch_config_handler() {
 	int errTimes = 0;
 	int fd = -1;
-
+	int counter = 0;
 	fd = inotify_init();
 	if (fd < 0) {
 		fprintf(stderr, "inotify_init failed\n");
@@ -856,8 +899,13 @@ INOTIFY_AGAIN:
 				else if(event->len == 0) {
 					if (strcmp(event_str[i], "IN_MODIFY") == 0) {
 						printf("watch config.json is modified\n");
-						update_status();
-						printf_devices_layout(cur_devices_layout);
+						counter++;
+						if (counter == 2) {
+							counter = 0;
+							printf("config.json is update\n");
+							update_status();
+							//printf_devices_layout(cur_devices_layout);
+						}
 					}
 				}
 			}
@@ -886,7 +934,7 @@ void *watch_config_thread_func() {
 void *set_mouse_positon_func() {
 	/* set mouse's absolute position in screen*/
 	create_abs_mouse();
-	usleep(1000000);
+	usleep(500000);
 	//global_x = 960, global_y = 540;
 	global_x = g_screen_width / 2, global_y = g_screen_height / 2 ;
 	set_mouse_position(global_x, global_y);
