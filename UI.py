@@ -64,8 +64,8 @@ class DraggableLabel(QLabel):
             new_y = max(0, min(GRID_NUM - 1, int(new_y // GRID_SIZE_H)))
             self.set_position(new_x, new_y)
 
-            # 更新配置
-            self.main_window.update_label(self)  # 调用主窗口的 update_config
+            # 更新label
+            self.main_window.update_label(self)
 # 共享端用服务器线程
 class ServerThread(QThread):
     # 定义一个信号来传递接收到的数据
@@ -239,7 +239,9 @@ class MasterControl(QWidget):
     def set_config(self):
         """加载配置文件，如果不存在则创建默认配置"""
         json_output = generate_json({}, [])
-        with open('config.json', 'w') as json_file:
+        with open('config.json', 'r+') as json_file:
+            json_file.seek(0)
+            json_file.truncate()
             json_file.write(json_output)
         self.clients = []  # 初始化客户端列表
         self.old_clients = []  # 初始化旧客户端列表
@@ -309,6 +311,7 @@ class MasterControl(QWidget):
         if reply == QMessageBox.Yes:
             # 这里可以添加你希望执行的操作
             self.stop_thread()
+            os.kill(os.getpid(), signal.SIGINT)
             self.parent.show()
             event.accept()  # 关闭窗口
         else:
@@ -416,7 +419,9 @@ class MasterControl(QWidget):
             # print(self.old_clients)
             # print(new_clients)
             json_output = generate_json(device_info, removed_device_ip)
-            with open('config.json', 'w') as json_file:
+            with open('config.json', 'r+') as json_file:
+                json_file.seek(0)
+                json_file.truncate()
                 json_file.write(json_output)
             self.old_clients = new_clients
             self.old_device_info = device_info
@@ -431,6 +436,7 @@ class MasterControl(QWidget):
         print("配置已保存")
     def btn_return_event(self):
         self.close()
+        # exit(0)
 
 # 自定义使用端界面类
 class Servant(QWidget):
@@ -474,9 +480,11 @@ class Servant(QWidget):
             # 这里可以添加你希望执行的操作
             if self.client_thread:
                 self.client_thread.send("logout")
+
             else:
                 print("client线程没有启动")
-            self.stop_thread()
+            # self.stop_thread()
+            os.kill(os.getpid(), signal.SIGINT)
             self.parent.show()
             event.accept()  # 关闭窗口
         else:
@@ -508,7 +516,7 @@ class Servant(QWidget):
         self.btn_connect.setToolTip('这是用来广播自己,并连接共享端的')
         self.btn_connect.clicked.connect(self.btn_connect_event)
         # 返回按钮
-        self.btn_return = QPushButton('退出并返回', self)
+        self.btn_return = QPushButton('退出', self)
         self.btn_return.setGeometry(10 + GRID_SIZE_W * (center_num + 1), GRID_SIZE_H * GRID_NUM + 10, GRID_SIZE_W - 20,
                                     GRID_SIZE_H - 20)
         self.btn_return.setStyleSheet(
@@ -521,12 +529,13 @@ class Servant(QWidget):
             "QPushButton{font-weight:bold}"
             "QPushButton{font-size:20px}")
         self.btn_return.clicked.connect(self.btn_return_event)
-        self.btn_return.setToolTip('这是用来退出并返回界面的')
+        self.btn_return.setToolTip('这是用来退出')
 
     def btn_connect_event(self):
         self.client_thread.send("online")
     def btn_return_event(self):
         self.close()
+        # exit(0)
 
 # 一些全局函数
 def get_broadcast_address():
