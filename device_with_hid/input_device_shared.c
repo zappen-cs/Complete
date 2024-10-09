@@ -61,7 +61,7 @@
 
 #define BUFFER_SIZE 1024
 
-#define ENABLE_CLIPBOARD 0
+#define ENABLE_CLIPBOARD 1
 
 #if ENABLE_CLIPBOARD
 uint8_t recv_buf[BUFFER_SIZE];
@@ -100,6 +100,7 @@ struct epoll_event events[20];
 
 double global_x, global_y;
 int mouse_accel = 1;
+int enable_encrypt = 0;
 double pointer_speed = -2;
 const char key[] = "123";//the decrypt key
 
@@ -141,6 +142,25 @@ static struct libinput_interface interface = {
 	.close_restricted = close_restricted,
 };
 
+static void send_clipboard(int sock_fd, struct mouse_kbd_event mke) {
+	//send clipboard content
+	printf("%s\n", __FUNCTION__);
+	copy_from_clipboard();
+	//if (strcmp(clipboard_content, send_buf) != 0) {// have changed
+	if (1) {// have changed
+		memset(&mke, 0, sizeof(mke));
+		mke.type = CLIPBOARD_EVENT;
+		strcpy(mke.data, clipboard_content);
+		if(enable_encrypt) {
+			xor_encrypt_decrypt(mke.data, strlen(mke.data), key, strlen(key));
+		}
+		int ret = send(sock_fd, &mke, sizeof(mke), 0);
+		if (ret < 0) {
+			printf("Failed to send mke.data to client\n");
+		}
+	}
+}
+
 static void handle_event(struct libinput_event *event) {
 	if (libinput_event_get_type(event) == LIBINPUT_EVENT_POINTER_MOTION) {
 		struct libinput_event_pointer *pointer_event = libinput_event_get_pointer_event(event);
@@ -180,6 +200,9 @@ static void handle_event(struct libinput_event *event) {
 				mke.pos.y = global_y / g_screen_height;
 				send(cur_devices_layout.left->sock_fd, &mke, sizeof(mke), 0);
 				g_device_id = DEVICE_ID_LEFT;
+#if ENABLE_CLIPBOARD
+				send_clipboard(cur_devices_layout.left->sock_fd, mke);
+#endif	
 				// block until receive the mouse event from other PC
 				while (1) {
 					memset(&mke, 0, sizeof(mke));
@@ -189,19 +212,21 @@ static void handle_event(struct libinput_event *event) {
 						global_y = mke.pos.y * g_screen_height;
 						set_mouse_position(global_x, global_y);
 						g_device_id = DEVICE_ID_LOCAL;
-						break;
 #if ENABLE_CLIPBOARD
 					} else if (mke.type == CLIPBOARD_EVENT) {
 						// copy content to clipboard
 						if (strcmp(clipboard_content, mke.data) == 0) 
-							continue;
-						//decrypt the message
-						xor_encrypt_decrypt(mke.data, strlen(mke.data), key, strlen(key));
-						//
+							break;
+						if(enable_encrypt) {
+							//decrypt the message
+							xor_encrypt_decrypt(mke.data, strlen(mke.data), key, strlen(key));
+						}
+						
 						printf("Received message '%s' from client\n", mke.data);
 						strcpy(clipboard_content, mke.data);
 						copy_to_clipboard((const char*)clipboard_content);
 						printf("Now the content of clipboard is '%s'\n", clipboard_content);
+						break;
 					}
 #else
 					} // end else if
@@ -222,28 +247,40 @@ static void handle_event(struct libinput_event *event) {
 				mke.pos.y = global_y / g_screen_height;
 				send(cur_devices_layout.right->sock_fd, &mke, sizeof(mke), 0);
 				g_device_id = DEVICE_ID_RIGHT;
+#if ENABLE_CLIPBOARD
+				send_clipboard(cur_devices_layout.right->sock_fd, mke);
+#endif
 				// block until receive the mouse event from dev2
 				while (1) {
 					memset(&mke, 0, sizeof(mke));
-					recv(cur_devices_layout.right->sock_fd, &mke, sizeof(mke), 0);
+					int temp = recv(cur_devices_layout.right->sock_fd, &mke, sizeof(mke), 0);
+					if (temp > 0) {
+						printf("%d\n",temp);
+					}
+					else {
+						perror("failed to receive");
+					}
 					if (mke.type == SET_MOUSE_POSITION) {
 						global_x = g_screen_width;
 						global_y = mke.pos.y * g_screen_height;
 						set_mouse_position(global_x, global_y);
 						g_device_id = DEVICE_ID_LOCAL;
-						break;
+						
+						
 #if ENABLE_CLIPBOARD
 					} else if (mke.type == CLIPBOARD_EVENT) {
 						// copy content to clipboard
 						if (strcmp(clipboard_content, mke.data) == 0) 
-							continue;
-						//decrypt the message
-						xor_encrypt_decrypt(mke.data, strlen(mke.data), key, strlen(key));
-						//
+							break;
+						if(enable_encrypt) {
+							//decrypt the message
+							xor_encrypt_decrypt(mke.data, strlen(mke.data), key, strlen(key));
+						}
 						printf("Received message '%s' from client\n", mke.data);
 						strcpy(clipboard_content, mke.data);
 						copy_to_clipboard((const char*)clipboard_content);
 						printf("Now the content of clipboard is '%s'\n", clipboard_content);
+						break;
 					}
 #else
 					} // end else if
@@ -264,7 +301,9 @@ static void handle_event(struct libinput_event *event) {
 				mke.pos.y = 0;
 				send(cur_devices_layout.up->sock_fd, &mke, sizeof(mke), 0);
 				g_device_id = DEVICE_ID_UP;
-
+#if ENABLE_CLIPBOARD
+				send_clipboard(cur_devices_layout.up->sock_fd, mke);
+#endif
 				while (1) {
 					memset(&mke, 0, sizeof(mke));
 					recv(cur_devices_layout.up->sock_fd, &mke, sizeof(mke), 0);
@@ -273,19 +312,21 @@ static void handle_event(struct libinput_event *event) {
 						global_y = 0;
 						set_mouse_position(global_x, global_y);
 						g_device_id = DEVICE_ID_LOCAL;
-						break;
 #if ENABLE_CLIPBOARD
 					} else if (mke.type == CLIPBOARD_EVENT) {
 						// copy content to clipboard
 						if (strcmp(clipboard_content, mke.data) == 0) 
-							continue;
-						//decrypt the message
-						xor_encrypt_decrypt(mke.data, strlen(mke.data), key, strlen(key));
-						//
+							break;
+						if(enable_encrypt) {
+							//decrypt the message
+							xor_encrypt_decrypt(mke.data, strlen(mke.data), key, strlen(key));
+						}
+						
 						printf("Received message '%s' from client\n", mke.data);
 						strcpy(clipboard_content, mke.data);
 						copy_to_clipboard((const char*)clipboard_content);
 						printf("Now the content of clipboard is '%s'\n", clipboard_content);
+						break;
 					}
 #else
 					} // end else if
@@ -307,28 +348,32 @@ static void handle_event(struct libinput_event *event) {
 				mke.pos.y = 0;
 				send(cur_devices_layout.down->sock_fd, &mke, sizeof(mke), 0);
 				g_device_id = DEVICE_ID_DOWN;
-
+#if ENABLE_CLIPBOARD
+				send_clipboard(cur_devices_layout.down->sock_fd, mke);
+#endif
 				while (1) {
 					memset(&mke, 0, sizeof(mke));
 					recv(cur_devices_layout.down->sock_fd, &mke, sizeof(mke), 0);
 					if (mke.type == SET_MOUSE_POSITION) {
 						global_x = mke.pos.x * g_screen_width;
-						global_y = 0;
+						global_y = g_screen_height;
 						set_mouse_position(global_x, global_y);
 						g_device_id = DEVICE_ID_LOCAL;
-						break;
 #if ENABLE_CLIPBOARD
 					} else if (mke.type == CLIPBOARD_EVENT) {
 						// copy content to clipboard
 						if (strcmp(clipboard_content, mke.data) == 0) 
-							continue;
-						//decrypt the message
-						xor_encrypt_decrypt(mke.data, strlen(mke.data), key, strlen(key));
-						//
+							break;
+						if(enable_encrypt) {
+							//decrypt the message
+							xor_encrypt_decrypt(mke.data, strlen(mke.data), key, strlen(key));
+						}
+						
 						printf("Received message '%s' from client\n", mke.data);
 						strcpy(clipboard_content, mke.data);
 						copy_to_clipboard((const char*)clipboard_content);
 						printf("Now the content of clipboard is '%s'\n", clipboard_content);
+						break;
 					}
 #else
 					} // end else if
@@ -347,35 +392,22 @@ void copy_from_clipboard() {
 		printf("Failed to open wl-paste");
 		return ;
 	}
-	fgets(clipboard_content, BUFFER_SIZE, wl_paste_ptr);
-	clipboard_content[strcspn(clipboard_content, "\n")] = '\0';
+	char buffer[BUFFER_SIZE];
+	clipboard_content[0] = '\0';  // 初始化 clipboard_content 为空字符串
+	//循环读取直到文件结束
+    while (fgets(buffer, BUFFER_SIZE, wl_paste_ptr) != NULL) {
+        // 拼接读取到的内容到 clipboard_content
+		// printf("get a line!\n");
+        strncat(clipboard_content, buffer, BUFFER_SIZE - strlen(clipboard_content) - 1);
+    }
+	// fgets(clipboard_content, BUFFER_SIZE, wl_paste_ptr);
+	char *last_newline = strrchr(clipboard_content, '\n');
+	if (last_newline != NULL) {
+        // 将最后一个换行符替换为字符串结束符
+        *last_newline = '\0';
+    }
+	// clipboard_content[strcspn(clipboard_content, "\n")] = '\0';
 	pclose(wl_paste_ptr);
-}
-
-void *listen_clipboard_thread_func() {
-	int ret;
-	while (1) {
-		sleep(1);
-		copy_from_clipboard();
-		if (strcmp(clipboard_content, send_buf) == 0)  // no changed
-			continue;
-		// user has executed wl-copy
-		strcpy(send_buf, clipboard_content);
-		struct mouse_kbd_event mke;
-		mke.type = CLIPBOARD_EVENT;
-		//encrypt the message
-		printf("The original message:%s\n",mke.data);
-		xor_encrypt_decrypt(mke.data, strlen(mke.data), key, strlen(key));
-		printf("The jiami message:%s\n",mke.data);
-		//
-		strcpy(mke.data, clipboard_content);
-		ret = send(client_sock_fd, &mke, sizeof(mke), 0);
-		if (ret < 0) {
-			printf("Failed to send data to client\n");
-			break;
-		}
-	}
-	return NULL;
 }
 #endif
 void *watch_mouse_thread_func() {
@@ -1023,16 +1055,6 @@ int main() {
 	} else {
 		DEBUG_INFO("Failed to create watch_mouse_thread");
 	}
-#if ENABLE_CLIPBOARD
-	/* a thread to listen the content of clipboard */
-	pthread_t listen_clipboard_thread;
-	ret = pthread_create(&listen_clipboard_thread, NULL, listen_clipboard_thread_func, NULL);
-	if (ret == 0) {
-		DEBUG_INFO("create thread successfully");
-	} else {
-		DEBUG_INFO("Failed to create thread");
-	}
-#endif 
 
 	///* deactivate mouse and keyboard */
 	char* mouse_cmd = calloc(10086, sizeof(char));
@@ -1047,9 +1069,6 @@ int main() {
 	pthread_join(watch_config_thread, NULL);
 	pthread_join(send_event_thread, NULL);
 	pthread_join(watch_mouse_thread, NULL);
-#if ENABLE_CLIPBOARD
-	pthread_join(listen_clipboard_thread, NULL);
-#endif
 	// 防止程序非ctrl + c 退出, 键盘鼠标不可用
 	sprintf(mouse_cmd, "sudo udevadm trigger --action=add %s", mouse_dev_path);
 	sprintf(kbd_cmd, "sudo udevadm trigger --action=add %s", kbd_dev_path);

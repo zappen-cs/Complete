@@ -49,7 +49,7 @@
 #define DEVICE_SEAT_LEFT 0x1234568
 #define DEVICE_SEAT_RIGHT 0x1234569
 
-#define ENABLE_COLIPBOARD 0
+#define ENABLE_COLIPBOARD 1
 #if ENABLE_COLIPBOARD
 #define CLIPBOARD_EVENT 0x1234563
 
@@ -90,6 +90,7 @@ int g_screen_height;
 double global_x, global_y;
 double pointer_speed = -2;
 int mouse_accel = 1;
+int enable_encrypt = 0;
 
 const char key[] = "123";//the decrypt key
 
@@ -108,6 +109,25 @@ static struct libinput_interface interface = {
     .open_restricted = open_restricted,
     .close_restricted = close_restricted,
 };
+
+static void send_clipboard(int sock_fd, struct mouse_kbd_event mke) {
+	//send clipboard content
+	printf("%s\n", __FUNCTION__);
+	copy_from_clipboard();
+	//if (strcmp(clipboard_content, send_buf) != 0) {// have changed
+	if (1) {// have changed
+		memset(&mke, 0, sizeof(mke));
+		mke.type = CLIPBOARD_EVENT;
+		strcpy(mke.data, clipboard_content);
+		if(enable_encrypt) {
+			xor_encrypt_decrypt(mke.data, strlen(mke.data), key, strlen(key));
+		}
+		int ret = send(sock_fd, &mke, sizeof(mke), 0);
+		if (ret < 0) {
+			printf("Failed to send mke.data to client\n");
+		}
+	}
+}
 
 static void handle_event(struct libinput_event *event) {
     if (libinput_event_get_type(event) == LIBINPUT_EVENT_POINTER_MOTION) {
@@ -139,10 +159,13 @@ static void handle_event(struct libinput_event *event) {
 				struct mouse_kbd_event mke;
 				memset(&mke, 0, sizeof(mke));
 				mke.type = SET_MOUSE_POSITION;
-				//mke.pos.x = 1920;
 				mke.pos.x = g_screen_width;
 				mke.pos.y = global_y / g_screen_height;
 				send(client_sock_fd, &mke, sizeof(mke), 0);
+#if ENABLE_COLIPBOARD
+
+				send_clipboard(client_sock_fd, mke);
+#endif	
 			}
 		}
 		if (global_x >= g_screen_width) {
@@ -155,6 +178,9 @@ static void handle_event(struct libinput_event *event) {
 				mke.pos.x = 0;
 				mke.pos.y = global_y / g_screen_height;
 				send(client_sock_fd, &mke, sizeof(mke), 0);
+#if ENABLE_COLIPBOARD
+				send_clipboard(client_sock_fd, mke);
+#endif	
 			}
 		}
 		if (global_y <= 0) {
@@ -167,6 +193,9 @@ static void handle_event(struct libinput_event *event) {
 				mke.pos.x = global_x / g_screen_width;
 				mke.pos.y = g_screen_height;
 				send(client_sock_fd, &mke, sizeof(mke), 0);
+#if ENABLE_COLIPBOARD
+				send_clipboard(client_sock_fd, mke);
+#endif	
 			}
 		}
 		if (global_y >= g_screen_height) {
@@ -179,6 +208,9 @@ static void handle_event(struct libinput_event *event) {
 				mke.pos.x = global_x / g_screen_width;
 				mke.pos.y = 0;
 				send(client_sock_fd, &mke, sizeof(mke), 0);
+#if ENABLE_COLIPBOARD
+				send_clipboard(client_sock_fd, mke);
+#endif	
 			}
 		}
     }
@@ -190,34 +222,20 @@ void copy_from_clipboard() {
 		printf("Failed to open wl-paste");
 		return ;
 	}
-	fgets(clipboard_content, BUFFER_SIZE, wl_paste_ptr);
-	clipboard_content[strcspn(clipboard_content, "\n")] = '\0';
+	char buffer[BUFFER_SIZE];
+	clipboard_content[0] = '\0';  // 初始化 clipboard_content 为空字符串
+	// 循环读取直到文件结束
+    while (fgets(buffer, BUFFER_SIZE, wl_paste_ptr) != NULL) {
+        // 拼接读取到的内容到 clipboard_content
+        strncat(clipboard_content, buffer, BUFFER_SIZE - strlen(clipboard_content) - 1);
+    }
+	char *last_newline = strrchr(clipboard_content, '\n');
+	if (last_newline != NULL) {
+        // 将最后一个换行符替换为字符串结束符
+        *last_newline = '\0';
+    }
+	// clipboard_content[strcspn(clipboard_content, "\n")] = '\0';
 	pclose(wl_paste_ptr);
-}
-void *listen_clipboard_thread_func() {
-	int ret;
-	while (1) {
-		sleep(1);
-		copy_from_clipboard();
-		if (strcmp(clipboard_content, send_buf) == 0)  // no changed
-			continue;
-		// user has executed wl-copy
-		strcpy(send_buf, clipboard_content);
-		struct mouse_kbd_event mke;
-		mke.type = CLIPBOARD_EVENT;
-		strcpy(mke.data, clipboard_content);
-		//encrypt the message
-		printf("The original message:%s\n",mke.data);
-		xor_encrypt_decrypt(mke.data, strlen(mke.data), key, strlen(key));
-		printf("The jiami message:%s\n",mke.data);
-		//
-		ret = send(client_sock_fd, &mke, sizeof(mke), 0);
-		if (ret < 0) {
-			printf("Failed to send data to client\n");
-			break;
-		}
-	}
-	return NULL;
 }
 #endif
 void *watch_mouse_thread_func() {
@@ -376,9 +394,10 @@ void *process_event_thread_func() {
 					// copy content to clipboard
 					if (strcmp(clipboard_content, mke.data) == 0) 
 						continue;
-					//decrypt the message
-					xor_encrypt_decrypt(mke.data, strlen(mke.data), key, strlen(key));
-					//
+					if(enable_encrypt) {
+						//decrypt the message
+						xor_encrypt_decrypt(mke.data, strlen(mke.data), key, strlen(key));
+					}
 					printf("Received message '%s' from client\n", mke.data);
 					strcpy(clipboard_content, mke.data);
 					copy_to_clipboard((const char*)clipboard_content);
@@ -405,6 +424,10 @@ void init_socket() {
 	ret = setsockopt(server_sock_fd, SOL_SOCKET, SO_REUSEADDR, &on, sizeof(on));
 	if (ret < 0) {
 		perror("Failed to setsockopt");
+	}
+	ret = setsockopt(server_sock_fd, SOL_SOCKET, SO_REUSEPORT, &on, sizeof(on));
+	if (ret < 0) {
+		perror("Failed to setsockopt SO_REUSEPORT");
 	}
 
 	/* 2.创建sockaddr_in结构体变量 */
@@ -552,7 +575,7 @@ void get_mouse_speed() {
 
 void Get_CtrlC_handler(int sig) {
 	signal(sig, SIG_IGN);
-
+	close(server_sock_fd);
 	printf("捕捉到Ctrl-C\n");
 
 
@@ -600,22 +623,9 @@ int main() {
 	} else {
 		DEBUG_INFO("Failed to create thread");
 	}
-#if ENABLE_COLIPBOARD
-	/* a thread to listen the content of clipboard */
-	pthread_t listen_clipboard_thread;
-	ret = pthread_create(&listen_clipboard_thread, NULL, listen_clipboard_thread_func, NULL);
-	if (ret == 0) {
-		DEBUG_INFO("create thread successfully");
-	} else {
-		DEBUG_INFO("Failed to create thread");
-	}
-#endif
 	pthread_join(process_event_thread, NULL);
 	pthread_join(watch_mouse_thread, NULL);
 	pthread_join(set_position_thread, NULL);
-#if ENABLE_COLIPBOARD
-	pthread_join(listen_clipboard_thread, NULL);
-#endif
 
 	return 0;
 }

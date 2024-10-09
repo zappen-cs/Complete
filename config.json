@@ -1,7 +1,11 @@
 {
-    "ip_list": [],
-    "device_info": {},
-    "removed_device_ip": [
+    "ip_list": [
         "192.168.10.128"
-    ]
+    ],
+    "device_info": {
+        "192.168.10.128": {
+            "position": "down"
+        }
+    },
+    "removed_device_ip": []
 }

@@ -83,12 +83,14 @@ void create_abs_mouse() {
 	ioctl(abs_mouse_fd, UI_SET_EVBIT, EV_ABS);
 	ioctl(abs_mouse_fd, UI_SET_ABSBIT, ABS_X);
 	ioctl(abs_mouse_fd, UI_SET_ABSBIT, ABS_Y);
+	extern int g_screen_width;
+	extern int g_screen_height;
 	abs_mouse_dev.absmin[ABS_X] = 0;
-	abs_mouse_dev.absmax[ABS_X] = 1920;
+	abs_mouse_dev.absmax[ABS_X] = g_screen_width;
 	abs_mouse_dev.absfuzz[ABS_X] = 0;
 	abs_mouse_dev.absflat[ABS_X] = 0;
 	abs_mouse_dev.absmin[ABS_Y] = 0;
-	abs_mouse_dev.absmax[ABS_Y] = 1080;
+	abs_mouse_dev.absmax[ABS_Y] = g_screen_height;
 	abs_mouse_dev.absfuzz[ABS_Y] = 0;
 	abs_mouse_dev.absflat[ABS_Y] = 0;
 

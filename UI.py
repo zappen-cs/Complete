@@ -36,6 +36,7 @@ class DraggableLabel(QLabel):
             self.setStyleSheet("background-color: orange; border: 1px solid black; padding: 5px;")
         self.setAlignment(Qt.AlignCenter)
         self.set_position(x, y)
+        self.setAcceptDrops(True)  # 允许拖拽操作
 
     def set_position(self, x, y):
         """根据网格坐标设置图标的绝对位置"""
@@ -66,6 +67,18 @@ class DraggableLabel(QLabel):
 
             # 更新label
             self.main_window.update_label(self)
+
+    def dragEnterEvent(self, event):
+        # 如果拖入的是文件，则接受拖拽事件
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+
+    def dropEvent(self, event):
+        # 获取文件路径
+        if event.mimeData().hasUrls():
+            file_path = event.mimeData().urls()[0].toLocalFile()
+            print(f"文件路径:\n{file_path}")  # 显示文件路径
+            # 你可以在这里进一步处理文件路径，如打开文件等操作
 # 共享端用服务器线程
 class ServerThread(QThread):
     # 定义一个信号来传递接收到的数据
