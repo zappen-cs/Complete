@@ -6,6 +6,7 @@ import socket
 import time
 import inspect
 from ctypes import *
+import subprocess
 import signal
 import netifaces
 import threading
@@ -22,12 +23,15 @@ port = 5000
 # 自定义可拖拽标签类
 class DraggableLabel(QLabel):
     """自定义可拖动的标签，用于显示客户端和服务器的IP地址"""
-    def __init__(self, name, x, y, main_window, movable=True):
+    def __init__(self, name, x, y, main_window, movable=True, user=None):
         super().__init__(name, main_window)  # 父类构造
         self.x = x
         self.y = y
         self.ip = name
+        self.server_ip = None
         self.movable = movable
+        self.remote_folder = "~/share_files/"
+        self.user = user
         self.main_window = main_window  # 这里确保是 ServerClientApp 的实例
         self.setFixedSize(GRID_SIZE_W, GRID_SIZE_H)
         if movable:
@@ -74,11 +78,37 @@ class DraggableLabel(QLabel):
             event.acceptProposedAction()
 
     def dropEvent(self, event):
+        if (not self.movable) and (not self.user):
+            QMessageBox.information(self, '失败', f'不能给自己发送文件')
+            return
+
         # 获取文件路径
         if event.mimeData().hasUrls():
-            file_path = event.mimeData().urls()[0].toLocalFile()
-            print(f"文件路径:\n{file_path}")  # 显示文件路径
-            # 你可以在这里进一步处理文件路径，如打开文件等操作
+            file_paths = [url.toLocalFile() for url in event.mimeData().urls()]
+            if self.movable:
+                remote_ip = self.ip
+            else:
+                remote_ip = self.server_ip
+            # 弹出确认窗口，询问用户是否确定传输文件
+            reply = QMessageBox.question(self, '确认',
+                                         f"你确定要将文件发送到 {remote_ip} 吗？",
+                                         QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+            if reply == QMessageBox.Yes:
+                # 获取所有文件路径
+                for file_path in file_paths:
+                    try:
+                        self.send_file_to_remote(file_path, self.user, remote_ip, self.remote_folder)
+                        QMessageBox.information(self, '成功', f'文件{file_path}成功传输到 {remote_ip}:{self.remote_folder}')
+                    except Exception as e:
+                        QMessageBox.critical(self, '错误', f'文件{file_path}传输失败:\n{str(e)}')
+            else:
+                print("取消传输文件")
+    def send_file_to_remote(self, file_path, user_name, ip, folder):
+        print("send message to remote host")
+        command = f"scp {file_path} {user_name}@{ip}:{folder}"
+        print(command)
+        return_code = os.system(command)
+        print(f"The return_code:{return_code}")
 # 共享端用服务器线程
 class ServerThread(QThread):
     # 定义一个信号来传递接收到的数据
@@ -100,12 +130,18 @@ class ServerThread(QThread):
         print("共享端开始处于在线状态...")
         while True:
             data, addr = self.server_socket.recvfrom(1024)
-            recv_data = data.decode('utf-8')
-            if recv_data in ["online", "login", "logout"]:
-                message = {'ip': addr[0], 'operation': data.decode('utf-8')}
+            try:
+                recv_data = json.loads(data.decode('utf-8'))
+            except json.JSONDecodeError:
+                print("接收到的数据不是有效的 JSON 格式")
+                continue
+            if recv_data["operation"] in ["online", "login", "logout"]:
+                if(recv_data["operation"] == "login"):
+                    self.send()
+                message = {'ip': addr[0], 'operation': recv_data["operation"], 'user': recv_data["user"]}
                 # 发出信号通知主线程更新 UI
                 self.message_received.emit(message)
-            elif recv_data == "who_is_online":
+            elif recv_data["operation"] == "who_is_online":
                 pass
             else:
                 print(f"error message: {recv_data}")
@@ -113,7 +149,7 @@ class ServerThread(QThread):
         broadcast_address = (get_broadcast_address(), port)  # 向子网广播
         print(f"向{broadcast_address}发送广播,查找在线设备")
         try:
-            self.server_socket.sendto("who_is_online".encode('utf-8'), broadcast_address)
+            self.server_socket.sendto(f'{{"operation":"who_is_online", "user":"{g_user}"}}'.encode('utf-8'), broadcast_address)
         except OSError as e:
             print(f"发送错误: {e}")
     def stop(self):
@@ -137,14 +173,18 @@ class ClientThread(QThread):
 
     def run(self):
         print("使用端开始处于在线状态...")
-        self.send("login")
+        self.send(f'{{"operation":"login", "user":"{g_user}"}}')
         while True:
             data, addr = self.client_socket.recvfrom(1024)
-            recv_data = data.decode('utf-8')
-            if recv_data in ["online", "login", "logout", "who_is_online"]:
-                if recv_data == "who_is_online":
-                    self.send("online")
-                    message = {'ip': addr, 'operation': data.decode('utf-8')}
+            try:
+                recv_data = json.loads(data.decode('utf-8'))
+            except json.JSONDecodeError:
+                print("接收到的数据不是有效的 JSON 格式")
+                continue
+            if recv_data["operation"] in ["online", "login", "logout", "who_is_online"]:
+                if recv_data["operation"] == "who_is_online":
+                    self.send(f'{{"operation":"online", "user":"{g_user}"}}')
+                    message = {'ip': addr[0], 'operation': recv_data["operation"], 'user': recv_data["user"]}
                     # 发出信号通知主线程更新 UI
                     self.message_received.emit(message)
             else:
@@ -282,6 +322,7 @@ class MasterControl(QWidget):
     def message_handle(self, message):
         """槽函数：接收到消息后更新 UI"""
         if message["operation"] in ["online", "login"]:
+            print(message["operation"])
             ip = message["ip"]
             # 检查 clients 列表中是否已有该 IP
             if any(client['ip'] == ip for client in self.clients):
@@ -293,7 +334,7 @@ class MasterControl(QWidget):
                     # 添加新客户端到 clients 列表
                     new_client = {'x': new_x, 'y': new_y, 'ip': ip}
                     self.clients.append(new_client)
-                    label = DraggableLabel(ip, new_x, new_y, self, movable=True)
+                    label = DraggableLabel(ip, new_x, new_y, self, movable=True, user=message["user"])
                     label.show()
                     self.Draglabel.append(label)
                     print(f"用户 {ip} 已添加到在线列表，位置: ({new_x}, {new_y})")
@@ -492,7 +533,7 @@ class Servant(QWidget):
         if reply == QMessageBox.Yes:
             # 这里可以添加你希望执行的操作
             if self.client_thread:
-                self.client_thread.send("logout")
+                self.client_thread.send(f'{{"operation":"logout", "user":"{g_user}"}}')
 
             else:
                 print("client线程没有启动")
@@ -509,6 +550,8 @@ class Servant(QWidget):
         self.client_thread.start()
     def message_handle(self, message):
         """槽函数：接收到消息后更新 UI"""
+        self.label.user = message["user"]
+        self.label.server_ip = message["ip"]
         print(message)
 
     def button(self):
@@ -623,6 +666,7 @@ if __name__ == '__main__':
         os.execvp("pkexec", pkexec_args)
 
     else:
+        g_user = os.getlogin()
         app = QApplication(sys.argv)
         main_window = MainWindow()
         main_window.show()
