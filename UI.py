@@ -105,7 +105,7 @@ class DraggableLabel(QLabel):
                 print("取消传输文件")
     def send_file_to_remote(self, file_path, user_name, ip, folder):
         print("send message to remote host")
-        command = f"scp {file_path} {user_name}@{ip}:{folder}"
+        command = f'su {g_user} -c scp "{file_path} {user_name}@{ip}:{folder}"'
         print(command)
         return_code = os.system(command)
         print(f"The return_code:{return_code}")
