@@ -105,7 +105,7 @@ class DraggableLabel(QLabel):
                 print("取消传输文件")
     def send_file_to_remote(self, file_path, user_name, ip, folder):
         print("send message to remote host")
-        command = f'su {g_user} -c scp "{file_path} {user_name}@{ip}:{folder}"'
+        command = f'su {g_user} -c "scp {file_path} {user_name}@{ip}:{folder}"'
         print(command)
         return_code = os.system(command)
         print(f"The return_code:{return_code}")
@@ -214,7 +214,7 @@ class StartThread(QThread):
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("软件的名字")
+        self.setWindowTitle("Seamless")
         self.resize(640, 480)
         self.center()
         self.setMaximumSize(640,480)
