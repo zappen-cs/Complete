@@ -13,46 +13,51 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-import ctypes
 import sys
 import os
 import json
 import socket
-import time
-import inspect
 from ctypes import *
 import subprocess
 import signal
+import shutil
 import netifaces
-import threading
+from PyQt5.QtGui import QDrag
 from PyQt5.QtWidgets import *
 from PyQt5.QtCore import *
-from PyQt5.QtGui import *
 # 一些全局参数
 load_so = 1
 GRID_NUM = 3  # 最好是奇数
-GRID_SIZE_H = 90  # 每个网格高度的像素大小
+GRID_SIZE_H = 160  # 每个网格高度的像素大小
 GRID_SIZE_W = 160  # 每个网格高度的像素大小
 port = 5000
 
 # 自定义可拖拽标签类
 class DraggableLabel(QLabel):
     """自定义可拖动的标签，用于显示客户端和服务器的IP地址"""
-    def __init__(self, name, x, y, main_window, movable=True, user=None):
+    def __init__(self, name, x, y, main_window, movable=True, user=None, is_sharer=True):
         super().__init__(name, main_window)  # 父类构造
         self.x = x
         self.y = y
         self.ip = name
         self.server_ip = None
         self.movable = movable
-        self.remote_folder = "~/share_files/"
+        self.remote_folder = "~/.share_files/"
         self.user = user
         self.main_window = main_window  # 这里确保是 ServerClientApp 的实例
         self.setFixedSize(GRID_SIZE_W, GRID_SIZE_H)
-        if movable:
-            self.setStyleSheet("background-color: lightblue; border: 1px solid black; padding: 5px;")
-        else:
-            self.setStyleSheet("background-color: orange; border: 1px solid black; padding: 5px;")
+        # 使用样式表设置 QLabel 的背景图片
+        self.setStyleSheet("QLabel { border-image: url('./image/other.png'); "
+                           "background-position: center; "
+                           "background-repeat: no-repeat; "
+                           "border: 1px solid black; padding: 5px;}")
+        if (not movable) and is_sharer:
+            # 使用样式表设置 QLabel 的背景图片
+            self.setStyleSheet("QLabel { border-image: url('./image/self.png'); "
+                               "background-position: center; "
+                               "background-repeat: no-repeat; "
+                               "border: 1px solid black; padding: 5px;}")
+
         self.setAlignment(Qt.AlignCenter)
         self.set_position(x, y)
         self.setAcceptDrops(True)  # 允许拖拽操作
@@ -68,6 +73,9 @@ class DraggableLabel(QLabel):
     def mousePressEvent(self, event):
         if self.movable and event.button() == Qt.LeftButton:
             self.drag_start_position = event.pos()
+        if (not self.movable) and event.button() == Qt.LeftButton:
+            self.startDrag()
+
 
     def mouseMoveEvent(self, event):
         if self.movable and event.buttons() & Qt.LeftButton:
@@ -112,18 +120,73 @@ class DraggableLabel(QLabel):
                 # 获取所有文件路径
                 for file_path in file_paths:
                     try:
+                        self.main_window.server_thread.send(operation = "send_files", target_ip = remote_ip)
                         self.send_file_to_remote(file_path, self.user, remote_ip, self.remote_folder)
-                        QMessageBox.information(self, '成功', f'文件{file_path}成功传输到 {remote_ip}:{self.remote_folder}')
                     except Exception as e:
                         QMessageBox.critical(self, '错误', f'文件{file_path}传输失败:\n{str(e)}')
             else:
                 print("取消传输文件")
     def send_file_to_remote(self, file_path, user_name, ip, folder):
         print("send message to remote host")
-        command = f'su {g_user} -c "scp {file_path} {user_name}@{ip}:{folder}"'
-        print(command)
-        return_code = os.system(command)
-        print(f"The return_code:{return_code}")
+        # 弹出一个对话框，让用户输入密码
+        password, ok = QInputDialog.getText(None, "输入远端密码", "请输入SSH密码:", QLineEdit.Password)
+        cmd = f'su {g_user} -c "scp {file_path} {user_name}@{ip}:{folder}"'
+        if not ok:
+            print(cmd)
+            return_code = os.system(cmd)
+        else:
+            if not password:
+                QMessageBox.critical(None, "错误", "密码不能为空")
+                return
+            else:
+                # 使用 subprocess 来执行 scp 命令，输入密码
+                process = subprocess.Popen(
+                    cmd,
+                    shell=True,
+                    stdin=subprocess.PIPE,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    universal_newlines=True
+                )
+
+                # 向进程发送密码（模拟交互式输入）
+                process.stdin.write(f"{password}\n")
+                process.stdin.flush()
+
+                # 等待命令执行完毕
+                stdout, stderr = process.communicate()
+                return_code = process.returncode
+        if return_code == 0:
+            print("文件传输成功")
+            QMessageBox.information(None, "成功", "文件传输成功")
+        else:
+            print(f"文件传输失败")
+            QMessageBox.critical(None, "错误", f"文件传输失败")
+
+    def get_file_urls_from_directory(self, directory):
+        # 获取用户的主目录
+        home_dir = os.path.expanduser("~")
+        # 定义 share_files 目录的路径
+        directory = os.path.join(home_dir, directory)
+        # 获取指定目录下的所有文件并返回 URL 列表
+        urls = []
+        for root, dirs, files in os.walk(directory):
+            for file in files:
+                file_path = os.path.join(root, file)
+                url = QUrl.fromLocalFile(file_path)  # 将本地文件路径转换为 QUrl
+                urls.append(url)
+        return urls
+
+    def startDrag(self):
+        urls = self.get_file_urls_from_directory(".share_files")
+        if urls:
+            mime_data = QMimeData()
+            mime_data.setUrls(urls)
+
+            drag = QDrag(self)
+            drag.setMimeData(mime_data)
+            drag.exec_(Qt.CopyAction)
+
 # 共享端用服务器线程
 class ServerThread(QThread):
     # 定义一个信号来传递接收到的数据
@@ -143,6 +206,7 @@ class ServerThread(QThread):
 
     def run(self):
         print("共享端开始处于在线状态...")
+        ip = get_host_ip()
         while True:
             data, addr = self.server_socket.recvfrom(1024)
             try:
@@ -158,15 +222,26 @@ class ServerThread(QThread):
                 self.message_received.emit(message)
             elif recv_data["operation"] == "who_is_online":
                 pass
+            elif recv_data["operation"] == "send_files" :
+                if recv_data["target_ip"] == ip:
+                    delete_all_files_in_directory(".share_files")
             else:
                 print(f"error message: {recv_data}")
-    def send(self):
+    def send(self, operation="who_is_online", target_ip = None):
         broadcast_address = (get_broadcast_address(), port)  # 向子网广播
-        print(f"向{broadcast_address}发送广播,查找在线设备")
-        try:
-            self.server_socket.sendto(f'{{"operation":"who_is_online", "user":"{g_user}"}}'.encode('utf-8'), broadcast_address)
-        except OSError as e:
-            print(f"发送错误: {e}")
+        if operation =="who_is_online":
+            print(f"向{broadcast_address}发送广播,查找在线设备")
+            try:
+                self.server_socket.sendto(f'{{"operation":"who_is_online", "user":"{g_user}"}}'.encode('utf-8'), broadcast_address)
+            except OSError as e:
+                print(f"发送错误: {e}")
+        if operation =="send_files":
+            print(f"向{broadcast_address}发送广播")
+            try:
+                self.server_socket.sendto(f'{{"operation":"send_files", "target_ip":"{target_ip}"}}'.encode('utf-8'),
+                                          broadcast_address)
+            except OSError as e:
+                print(f"发送错误: {e}")
     def stop(self):
         self.terminate()
 # 使用端用客户器线程
@@ -189,6 +264,7 @@ class ClientThread(QThread):
     def run(self):
         print("使用端开始处于在线状态...")
         self.send(f'{{"operation":"login", "user":"{g_user}"}}')
+        ip = get_host_ip()
         while True:
             data, addr = self.client_socket.recvfrom(1024)
             try:
@@ -196,12 +272,14 @@ class ClientThread(QThread):
             except json.JSONDecodeError:
                 print("接收到的数据不是有效的 JSON 格式")
                 continue
-            if recv_data["operation"] in ["online", "login", "logout", "who_is_online"]:
+            if recv_data["operation"] in ["online", "login", "logout", "who_is_online", "send_files"]:
                 if recv_data["operation"] == "who_is_online":
                     self.send(f'{{"operation":"online", "user":"{g_user}"}}')
                     message = {'ip': addr[0], 'operation': recv_data["operation"], 'user': recv_data["user"]}
                     # 发出信号通知主线程更新 UI
                     self.message_received.emit(message)
+                if recv_data["operation"] == "send_files" and recv_data["target_ip"] == ip:
+                    delete_all_files_in_directory(".share_files")
             else:
                 print(f"error message: {recv_data}")
     def send(self,content):
@@ -233,10 +311,25 @@ class MainWindow(QMainWindow):
         self.resize(640, 480)
         self.center()
         self.setMaximumSize(640,480)
+        self.check_and_create_share_files()
         self.identityChoose()
 
         self.setWindowOpacity(0.9)
 
+    def check_and_create_share_files(self):
+        # 获取用户的主目录
+        home_dir = os.path.expanduser("~")
+        # 定义 share_files 目录的路径
+        share_files_dir = os.path.join(home_dir, ".share_files")
+
+        # 检查目录是否存在
+        if not os.path.exists(share_files_dir):
+            # 如果不存在，则创建该目录
+            cmd = f'su {g_user} -c "mkdir ~/.share_files"'
+            os.system(cmd)
+            print(f"目录 {share_files_dir} 已创建")
+        else:
+            print(f"目录 {share_files_dir} 已存在")
     def center(self):
         """将窗口移动到屏幕中心"""
         screen_geometry = QDesktopWidget().availableGeometry()
@@ -366,8 +459,8 @@ class MasterControl(QWidget):
         self.update_config()  # 更新配置文件
     def main_window(self):
         self.setWindowTitle('共享端')
-        self.resize(GRID_NUM * GRID_SIZE_W,  (GRID_NUM+1)* GRID_SIZE_H)
-        self.setMaximumSize( GRID_NUM * GRID_SIZE_W,  (GRID_NUM+1)* GRID_SIZE_H)
+        self.resize(GRID_NUM * GRID_SIZE_W,  int((GRID_NUM+0.7)* GRID_SIZE_H))
+        self.setMaximumSize( GRID_NUM * GRID_SIZE_W,  int((GRID_NUM+0.7)* GRID_SIZE_H))
         # 阻塞主窗口
         self.setWindowModality(Qt.ApplicationModal)
     def stop_thread(self):
@@ -380,6 +473,7 @@ class MasterControl(QWidget):
         if reply == QMessageBox.Yes:
             # 这里可以添加你希望执行的操作
             self.stop_thread()
+            check_and_delete_share_files()
             os.kill(os.getpid(), signal.SIGINT)
             self.parent.show()
             event.accept()  # 关闭窗口
@@ -400,7 +494,7 @@ class MasterControl(QWidget):
     def setup_server(self):
         """根据配置文件添加服务器图标"""
         local_ip = get_host_ip()
-        self.server_label = DraggableLabel(local_ip, GRID_NUM//2, GRID_NUM//2, self, movable=False)
+        self.server_label = DraggableLabel(local_ip, GRID_NUM//2, GRID_NUM//2, self, movable=False, is_sharer=True)
     def update_clients(self):
         """更新客户端图标位置"""
         to_delete_list=[]
@@ -429,7 +523,7 @@ class MasterControl(QWidget):
         center_num = GRID_NUM//2
         # 搜索按钮
         self.btn_search = QPushButton('搜索在线设备', self)
-        self.btn_search.setGeometry(10+GRID_SIZE_W*(center_num-1),  GRID_SIZE_H*GRID_NUM+10,GRID_SIZE_W-20, GRID_SIZE_H-20)
+        self.btn_search.setGeometry(10+GRID_SIZE_W*(center_num-1),  GRID_SIZE_H*GRID_NUM+10,GRID_SIZE_W-20, GRID_SIZE_H-100)
         self.btn_search.setStyleSheet(
             "QPushButton{color:rgba(255,255,255,255)}"
             "QPushButton:hover{color:black}"
@@ -443,7 +537,7 @@ class MasterControl(QWidget):
         self.btn_search.clicked.connect(self.btn_search_event)
         # 保存配置按钮
         self.btn_save = QPushButton('保存配置', self)
-        self.btn_save.setGeometry(10+GRID_SIZE_W*center_num, GRID_SIZE_H * GRID_NUM + 10, GRID_SIZE_W - 20, GRID_SIZE_H - 20)
+        self.btn_save.setGeometry(10+GRID_SIZE_W*center_num, GRID_SIZE_H * GRID_NUM + 10, GRID_SIZE_W - 20, GRID_SIZE_H - 100)
         self.btn_save.setStyleSheet(
             "QPushButton{color:rgba(255,255,255,255)}"
             "QPushButton:hover{color:black}"
@@ -457,7 +551,7 @@ class MasterControl(QWidget):
         self.btn_save.clicked.connect(self.btn_save_event)
         # 返回按钮
         self.btn_return = QPushButton('返回', self)
-        self.btn_return.setGeometry(10+GRID_SIZE_W*(center_num+1),  GRID_SIZE_H*GRID_NUM+10, GRID_SIZE_W-20, GRID_SIZE_H-20)
+        self.btn_return.setGeometry(10+GRID_SIZE_W*(center_num+1),  GRID_SIZE_H*GRID_NUM+10, GRID_SIZE_W-20, GRID_SIZE_H-100)
         self.btn_return.setStyleSheet(
             "QPushButton{color:rgba(255,255,255,255)}"
             "QPushButton:hover{color:black}"
@@ -531,11 +625,11 @@ class Servant(QWidget):
     def set_a_label(self):
         """根据配置文件添加服务器图标"""
         local_ip = get_host_ip()
-        self.label = DraggableLabel(local_ip, GRID_NUM//2, GRID_NUM//2, self, movable=False)
+        self.label = DraggableLabel(local_ip, GRID_NUM//2, GRID_NUM//2, self, movable=False, is_sharer=False)
     def main_window(self):
         self.setWindowTitle('使用端')
-        self.resize(GRID_NUM * GRID_SIZE_W, (GRID_NUM + 1) * GRID_SIZE_H)
-        self.setMaximumSize(GRID_NUM * GRID_SIZE_W, (GRID_NUM + 1) * GRID_SIZE_H)
+        self.resize(GRID_NUM * GRID_SIZE_W, int((GRID_NUM + 0.7) * GRID_SIZE_H))
+        self.setMaximumSize(GRID_NUM * GRID_SIZE_W, int((GRID_NUM + 1) * GRID_SIZE_H))
         # 阻塞主窗口
         self.setWindowModality(Qt.ApplicationModal)
     def stop_thread(self):
@@ -553,8 +647,9 @@ class Servant(QWidget):
             else:
                 print("client线程没有启动")
             # self.stop_thread()
+            check_and_delete_share_files()
             os.kill(os.getpid(), signal.SIGINT)
-            self.parent.show()
+            # self.parent.show()
             event.accept()  # 关闭窗口
         else:
             event.ignore()  # 忽略关闭事件
@@ -574,7 +669,7 @@ class Servant(QWidget):
         # 连接按钮
         self.btn_connect = QPushButton('连接', self)
         self.btn_connect.setGeometry(10 + GRID_SIZE_W * (center_num - 1), GRID_SIZE_H * GRID_NUM + 10, GRID_SIZE_W - 20,
-                                  GRID_SIZE_H - 20)
+                                  GRID_SIZE_H - 100)
         self.btn_connect.setStyleSheet(
             "QPushButton{color:rgba(255,255,255,255)}"
             "QPushButton:hover{color:black}"
@@ -589,7 +684,7 @@ class Servant(QWidget):
         # 返回按钮
         self.btn_return = QPushButton('退出', self)
         self.btn_return.setGeometry(10 + GRID_SIZE_W * (center_num + 1), GRID_SIZE_H * GRID_NUM + 10, GRID_SIZE_W - 20,
-                                    GRID_SIZE_H - 20)
+                                    GRID_SIZE_H - 100)
         self.btn_return.setStyleSheet(
             "QPushButton{color:rgba(255,255,255,255)}"
             "QPushButton:hover{color:black}"
@@ -636,6 +731,46 @@ def get_host_ip():
     finally:
         s.close()
     return ip
+def check_and_delete_share_files():
+    # 获取用户的主目录
+    home_dir = os.path.expanduser("~")
+    # 定义 share_files 目录的路径
+    share_files_dir = os.path.join(home_dir, ".share_files")
+
+    # 检查目录是否存在
+    if os.path.exists(share_files_dir):
+        # 如果存在，则删除该目录
+        shutil.rmtree(share_files_dir)
+        print(f"目录 {share_files_dir} 已删除")
+    else:
+        print(f"目录 {share_files_dir} 不存在")
+def delete_all_files_in_directory(directory):
+    # 获取用户的主目录
+    home_dir = os.path.expanduser("~")
+    # 定义 share_files 目录的路径
+    directory = os.path.join(home_dir, directory)
+    if not os.path.exists(directory):
+        print(f"目录 {directory} 不存在")
+        return
+
+    # 获取目录中的所有文件和子文件夹
+    for root, dirs, files in os.walk(directory):
+        for file in files:
+            # 删除文件
+            file_path = os.path.join(root, file)
+            try:
+                os.remove(file_path)
+            except Exception as e:
+                print(f"删除文件 {file_path} 失败: {e}")
+
+        # 如果需要删除空子目录，可以启用下面代码
+        for dir in dirs:
+            dir_path = os.path.join(root, dir)
+            try:
+                shutil.rmtree(dir_path)
+            except Exception as e:
+                print(f"删除目录 {dir_path} 失败: {e}")
+    print("完成删除")
 def generate_json(device_info, ip_removed):
     # 从 device_info 中提取 IP 列表
     ip_list_full = list(device_info.keys())
