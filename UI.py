@@ -129,7 +129,7 @@ class DraggableLabel(QLabel):
     def send_file_to_remote(self, file_path, user_name, ip, folder):
         print("send message to remote host")
         # 弹出一个对话框，让用户输入密码
-        password, ok = QInputDialog.getText(None, "输入远端密码", "请输入SSH密码:", QLineEdit.Password)
+        password, ok = QInputDialog.getText(None, "输入远端密码", "请输入密码:", QLineEdit.Password)
         cmd = f'su {g_user} -c "scp {file_path} {user_name}@{ip}:{folder}"'
         if not ok:
             print(cmd)
@@ -597,6 +597,8 @@ class MasterControl(QWidget):
     def btn_save_event(self):
         self.update_config()
         print("配置已保存")
+        QMessageBox.information(self, '成功', f'配置保存成功')
+
     def btn_return_event(self):
         self.close()
         # exit(0)
