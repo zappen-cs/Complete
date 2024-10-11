@@ -550,7 +550,7 @@ class MasterControl(QWidget):
         self.btn_save.setToolTip('这是用来保存配置的')
         self.btn_save.clicked.connect(self.btn_save_event)
         # 返回按钮
-        self.btn_return = QPushButton('返回', self)
+        self.btn_return = QPushButton('退出', self)
         self.btn_return.setGeometry(10+GRID_SIZE_W*(center_num+1),  GRID_SIZE_H*GRID_NUM+10, GRID_SIZE_W-20, GRID_SIZE_H-100)
         self.btn_return.setStyleSheet(
             "QPushButton{color:rgba(255,255,255,255)}"

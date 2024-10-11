@@ -49,6 +49,8 @@ def create_desktop_icons_for_executables():
         if os.path.isfile(item_path) and os.access(item_path, os.X_OK) and not (os.path.splitext(item_path)[1] == '.so'):
             create_desktop_file(item_path)
 
-
+def create_X():
+    os.system("pyinstaller -w -F UI.py --distpath .")
 if __name__ == "__main__":
+    create_X()
     create_desktop_icons_for_executables()
