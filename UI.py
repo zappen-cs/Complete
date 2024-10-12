@@ -31,6 +31,7 @@ GRID_NUM = 3  # 最好是奇数
 GRID_SIZE_H = 160  # 每个网格高度的像素大小
 GRID_SIZE_W = 160  # 每个网格高度的像素大小
 port = 5000
+ip_psw_dic = {}
 
 # 自定义可拖拽标签类
 class DraggableLabel(QLabel):
@@ -120,7 +121,10 @@ class DraggableLabel(QLabel):
                 # 获取所有文件路径
                 for file_path in file_paths:
                     try:
-                        self.main_window.server_thread.send(operation = "send_files", target_ip = remote_ip)
+                        if self.movable:
+                            self.main_window.server_thread.send(f'{{"operation":"send_files", "target_ip":"{remote_ip}"}}')
+                        else:
+                            self.main_window.client_thread.send(f'{{"operation":"send_files", "target_ip":"{remote_ip}"}}')
                         self.send_file_to_remote(file_path, self.user, remote_ip, self.remote_folder)
                     except Exception as e:
                         QMessageBox.critical(self, '错误', f'文件{file_path}传输失败:\n{str(e)}')
@@ -128,35 +132,17 @@ class DraggableLabel(QLabel):
                 print("取消传输文件")
     def send_file_to_remote(self, file_path, user_name, ip, folder):
         print("send message to remote host")
-        # 弹出一个对话框，让用户输入密码
-        password, ok = QInputDialog.getText(None, "输入远端密码", "请输入密码:", QLineEdit.Password)
-        cmd = f'su {g_user} -c "scp {file_path} {user_name}@{ip}:{folder}"'
-        if not ok:
-            print(cmd)
-            return_code = os.system(cmd)
-        else:
-            if not password:
-                QMessageBox.critical(None, "错误", "密码不能为空")
-                return
-            else:
-                # 使用 subprocess 来执行 scp 命令，输入密码
-                process = subprocess.Popen(
-                    cmd,
-                    shell=True,
-                    stdin=subprocess.PIPE,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    universal_newlines=True
-                )
-
-                # 向进程发送密码（模拟交互式输入）
-                process.stdin.write(f"{password}\n")
-                process.stdin.flush()
-
-                # 等待命令执行完毕
-                stdout, stderr = process.communicate()
-                return_code = process.returncode
-        if return_code == 0:
+        # # 弹出一个对话框，让用户输入密码
+        # password, ok = QInputDialog.getText(None, "输入远端密码", "请输入密码:", QLineEdit.Password)
+        # cmd = f'su {g_user} -c "rsync -e "ssh -o StrictHostKeyChecking=no" {file_path} {user_name}@{ip}:{folder}"'
+        password = ip_psw_dic.get(ip, "")
+        if password == "":
+            QMessageBox.critical(None, "错误", "没有该ip主机密码")
+            return 0
+        cmd = f'sshpass -p {password} scp -o StrictHostKeyChecking=no {file_path} {user_name}@{ip}:{folder}'
+        # 执行 SCP 命令
+        result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+        if result.returncode == 0:
             print("文件传输成功")
             QMessageBox.information(None, "成功", "文件传输成功")
         else:
@@ -187,6 +173,49 @@ class DraggableLabel(QLabel):
             drag.setMimeData(mime_data)
             drag.exec_(Qt.CopyAction)
 
+class PasswordDialog(QDialog):
+    def __init__(self, local_default="", remote_default=""):
+        super().__init__()
+
+        # 设置对话框标题
+        self.setWindowTitle("输入密码")
+
+        # 布局
+        layout = QVBoxLayout()
+
+        # 本地主机密码输入
+        self.local_password_label = QLabel("本地主机密码:")
+        self.local_password_input = QLineEdit()
+        self.local_password_input.setEchoMode(QLineEdit.Password)  # 隐藏输入字符
+        self.local_password_input.setText(local_default)  # 设置默认值
+        layout.addWidget(self.local_password_label)
+        layout.addWidget(self.local_password_input)
+
+        # 远程主机密码输入
+        self.remote_password_label = QLabel("远程主机密码:")
+        self.remote_password_input = QLineEdit()
+        self.remote_password_input.setEchoMode(QLineEdit.Password)  # 隐藏输入字符
+        self.remote_password_input.setText(remote_default)  # 设置默认值
+        layout.addWidget(self.remote_password_label)
+        layout.addWidget(self.remote_password_input)
+
+        # 按钮
+        button_layout = QHBoxLayout()
+        self.ok_button = QPushButton("确定")
+        self.cancel_button = QPushButton("取消")
+        button_layout.addWidget(self.ok_button)
+        button_layout.addWidget(self.cancel_button)
+        layout.addLayout(button_layout)
+
+        # 设置主布局
+        self.setLayout(layout)
+
+        # 连接按钮信号槽
+        self.ok_button.clicked.connect(self.accept)
+        self.cancel_button.clicked.connect(self.reject)
+
+    def get_passwords(self):
+        return self.local_password_input.text(), self.remote_password_input.text()
 # 共享端用服务器线程
 class ServerThread(QThread):
     # 定义一个信号来传递接收到的数据
@@ -215,33 +244,26 @@ class ServerThread(QThread):
                 print("接收到的数据不是有效的 JSON 格式")
                 continue
             if recv_data["operation"] in ["online", "login", "logout"]:
+                # 通知新加入的使用端本共享端用户名
                 if(recv_data["operation"] == "login"):
-                    self.send()
+                    self.send(f'{{"operation":"set_user", "user":"{g_user}"}}')
                 message = {'ip': addr[0], 'operation': recv_data["operation"], 'user': recv_data["user"]}
                 # 发出信号通知主线程更新 UI
                 self.message_received.emit(message)
-            elif recv_data["operation"] == "who_is_online":
+            elif recv_data["operation"] in ["who_is_online", "set_user", "set_psw"]:
                 pass
             elif recv_data["operation"] == "send_files" :
                 if recv_data["target_ip"] == ip:
                     delete_all_files_in_directory(".share_files")
             else:
                 print(f"error message: {recv_data}")
-    def send(self, operation="who_is_online", target_ip = None):
+    def send(self, content):
         broadcast_address = (get_broadcast_address(), port)  # 向子网广播
-        if operation =="who_is_online":
-            print(f"向{broadcast_address}发送广播,查找在线设备")
-            try:
-                self.server_socket.sendto(f'{{"operation":"who_is_online", "user":"{g_user}"}}'.encode('utf-8'), broadcast_address)
-            except OSError as e:
-                print(f"发送错误: {e}")
-        if operation =="send_files":
-            print(f"向{broadcast_address}发送广播")
-            try:
-                self.server_socket.sendto(f'{{"operation":"send_files", "target_ip":"{target_ip}"}}'.encode('utf-8'),
-                                          broadcast_address)
-            except OSError as e:
-                print(f"发送错误: {e}")
+        print(f"向{broadcast_address}发送广播,查找在线设备")
+        try:
+            self.server_socket.sendto(content.encode('utf-8'), broadcast_address)
+        except OSError as e:
+            print(f"发送错误: {e}")
     def stop(self):
         self.terminate()
 # 使用端用客户器线程
@@ -272,7 +294,7 @@ class ClientThread(QThread):
             except json.JSONDecodeError:
                 print("接收到的数据不是有效的 JSON 格式")
                 continue
-            if recv_data["operation"] in ["online", "login", "logout", "who_is_online", "send_files"]:
+            if recv_data["operation"] in ["online", "login", "logout", "who_is_online", "send_files", "set_user", "set_psw"]:
                 if recv_data["operation"] == "who_is_online":
                     self.send(f'{{"operation":"online", "user":"{g_user}"}}')
                     message = {'ip': addr[0], 'operation': recv_data["operation"], 'user': recv_data["user"]}
@@ -280,6 +302,13 @@ class ClientThread(QThread):
                     self.message_received.emit(message)
                 if recv_data["operation"] == "send_files" and recv_data["target_ip"] == ip:
                     delete_all_files_in_directory(".share_files")
+                if recv_data["operation"] == "set_user":
+                    message = {'ip': addr[0], 'operation': recv_data["operation"], 'user': recv_data["user"]}
+                    # 发出信号通知主线程更新 UI
+                    self.message_received.emit(message)
+                if recv_data["operation"] == "set_psw":
+                    ip_psw_dic[addr[0]] = recv_data["psw"]
+                    print(ip_psw_dic)
             else:
                 print(f"error message: {recv_data}")
     def send(self,content):
@@ -383,6 +412,7 @@ class MasterControl(QWidget):
         # 参数初始化
         self.config_file = "config.json"
         self.Draglabel=[]
+        self.ip = get_host_ip()
         # 初始化配置文件
         self.set_config()
         self.start_server_thread()# 开启服务器线程
@@ -400,10 +430,15 @@ class MasterControl(QWidget):
     def set_config(self):
         """加载配置文件，如果不存在则创建默认配置"""
         json_output = generate_json({}, [])
-        with open('config.json', 'r+') as json_file:
-            json_file.seek(0)
-            json_file.truncate()
-            json_file.write(json_output)
+        # 如果文件不存在，创建一个空文件
+        if not os.path.exists('./config.json'):
+            with open('./config.json', 'w') as json_file:
+                json_file.write(json_output)
+        else:
+            with open('./config.json', 'r+') as json_file:
+                json_file.seek(0)
+                json_file.truncate()
+                json_file.write(json_output)
         self.clients = []  # 初始化客户端列表
         self.old_clients = []  # 初始化旧客户端列表
         self.old_device_info = {}  # 初始化设备信息
@@ -413,7 +448,7 @@ class MasterControl(QWidget):
         self.server_thread = ServerThread()
         self.server_thread.message_received.connect(self.message_handle)  # 连接信号到槽函数
         self.server_thread.start()
-        self.server_thread.send()
+        self.server_thread.send(f'{{"operation":"who_is_online", "user":"{g_user}"}}')
     def find_available_position(self):
         """查找一个未被占用的位置"""
         taken_positions = {(client['x'], client['y']) for client in self.clients}
@@ -436,19 +471,41 @@ class MasterControl(QWidget):
             if any(client['ip'] == ip for client in self.clients):
                 print(f"用户 {ip} 已经在线，跳过添加。")
             else:
-                # 查找可用的位置
-                new_x, new_y = self.find_available_position()
-                if new_x is not None and new_y is not None:
-                    # 添加新客户端到 clients 列表
-                    new_client = {'x': new_x, 'y': new_y, 'ip': ip}
-                    self.clients.append(new_client)
-                    label = DraggableLabel(ip, new_x, new_y, self, movable=True, user=message["user"])
-                    label.show()
-                    self.Draglabel.append(label)
-                    print(f"用户 {ip} 已添加到在线列表，位置: ({new_x}, {new_y})")
-                    print(self.clients)
-                else:
-                    print("没有可用的位置，无法添加新用户。")
+                count = 5
+                while count > 0:
+                    self_psw = ip_psw_dic.get(self.ip, "")
+                    remote_psw = ip_psw_dic.get(ip, "")
+                    # 如果本地或远端密码没有存储就弹出窗口获取密码
+                    if self_psw == "" or remote_psw == "":
+                        self_psw, remote_psw = get_passwords(local_default=self_psw, remote_default=remote_psw)
+                        if (not self_psw) and (not remote_psw):
+                            print("关闭了窗口")
+                            return
+                    if check_ip_psw(message["user"], ip, remote_psw) and check_ip_psw(os.getlogin(), self.ip, self_psw):
+                        ip_psw_dic[ip] = remote_psw
+                        ip_psw_dic[self.ip] = self_psw
+                        QMessageBox.information(None, "正确", "密码正确，即将连接该主机")
+                        break
+                    else:
+                        count -= 1
+                        QMessageBox.information(None, "错误", f"密码错误，还可以尝试{count}次")
+                if count > 0:
+                    print("密码正确，添加该主机")
+                    print(ip_psw_dic)
+                    self.server_thread.send(f'{{"operation":"set_psw", "psw":"{ip_psw_dic[self.ip]}"}}')
+                    # 查找可用的位置
+                    new_x, new_y = self.find_available_position()
+                    if new_x is not None and new_y is not None:
+                        # 添加新客户端到 clients 列表
+                        new_client = {'x': new_x, 'y': new_y, 'ip': ip}
+                        self.clients.append(new_client)
+                        label = DraggableLabel(ip, new_x, new_y, self, movable=True, user=message["user"])
+                        label.show()
+                        self.Draglabel.append(label)
+                        print(f"用户 {ip} 已添加到在线列表，位置: ({new_x}, {new_y})")
+                        print(self.clients)
+                    else:
+                        print("没有可用的位置，无法添加新用户。")
 
         elif message["operation"] == "logout":
             ip = message["ip"]
@@ -593,7 +650,7 @@ class MasterControl(QWidget):
             # print(device_info)
             pass
     def btn_search_event(self):
-        self.server_thread.send()
+        self.server_thread.send(f'{{"operation":"who_is_online", "user":"{g_user}"}}')
     def btn_save_event(self):
         self.update_config()
         print("配置已保存")
@@ -622,15 +679,15 @@ class Servant(QWidget):
         self.main_window()
         self.set_a_label()
 
-        # 按钮
-        self.button()
+        # # 按钮
+        # self.button()
     def set_a_label(self):
         """根据配置文件添加服务器图标"""
         local_ip = get_host_ip()
         self.label = DraggableLabel(local_ip, GRID_NUM//2, GRID_NUM//2, self, movable=False, is_sharer=False)
     def main_window(self):
         self.setWindowTitle('使用端')
-        self.resize(GRID_NUM * GRID_SIZE_W, int((GRID_NUM + 0.7) * GRID_SIZE_H))
+        self.resize(GRID_NUM * GRID_SIZE_W, GRID_NUM  * GRID_SIZE_H)
         self.setMaximumSize(GRID_NUM * GRID_SIZE_W, int((GRID_NUM + 1) * GRID_SIZE_H))
         # 阻塞主窗口
         self.setWindowModality(Qt.ApplicationModal)
@@ -773,6 +830,38 @@ def delete_all_files_in_directory(directory):
             except Exception as e:
                 print(f"删除目录 {dir_path} 失败: {e}")
     print("完成删除")
+def check_ip_psw(user, ip, password):
+    # 创建一个临时文件
+    local_file = "temp_test_file.txt"
+    with open(local_file, "w") as f:
+        f.write("")  # 写入空内容，文件可以为空
+    # 构建rsync命令，用于测试连接
+    cmd = f"sshpass -p {password} scp -o StrictHostKeyChecking=no {local_file} {user}@{ip}:~ "
+    try:
+        # 执行 SCP 命令
+        result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+        # 检查命令执行结果
+        if result.returncode == 0:
+            print("连接成功，IP 和密码正确！")
+            return True
+        else:
+            print(f"连接失败：{result.stderr}")
+            return False
+    except Exception as e:
+        print(f"发生错误：{e}")
+        return False
+    finally:
+        # 删除临时文件
+        if os.path.exists(local_file):
+            os.remove(local_file)
+def get_passwords(local_default="", remote_default=""):
+    # 假设已经有QApplication，不需要再创建
+    dialog = PasswordDialog(local_default, remote_default)
+
+    if dialog.exec_() == QDialog.Accepted:
+        return dialog.get_passwords()
+    else:
+        return None, None
 def generate_json(device_info, ip_removed):
     # 从 device_info 中提取 IP 列表
     ip_list_full = list(device_info.keys())

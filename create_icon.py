@@ -18,7 +18,7 @@ Terminal=false
     desktop_path = os.path.join(os.path.expanduser("~"), "Desktop")
     desktop_path_zh = os.path.join(os.path.expanduser("~"), "桌面")
     app_desktop_path = os.path.join(os.path.expanduser("~"), ".local", "share", "applications", desktop_file_name)
-    desktop_file_path = "";
+    desktop_file_path = ""
     print(desktop_path, desktop_path_zh)
     if os.path.exists(desktop_path):
         desktop_file_path = os.path.join(desktop_path, desktop_file_name)
@@ -51,6 +51,7 @@ def create_desktop_icons_for_executables():
 
 def create_X():
     os.system("pyinstaller -w -F UI.py --distpath .")
+    os.system("rm -rf build *.spec")
 if __name__ == "__main__":
     create_X()
     create_desktop_icons_for_executables()

@@ -5,4 +5,4 @@ PyQt5==5.15.10
 
 
 C语言环境：
-sudo apt install wl-clipboard libinput-dev libwayland-dev
+sudo apt install wl-clipboard libinput-dev libwayland-dev sshpass openssh-server
