@@ -50,7 +50,7 @@ def create_desktop_icons_for_executables():
             create_desktop_file(item_path)
 
 def create_X():
-    os.system("pyinstaller -w -F UI.py --distpath .")
+    os.system("pyinstaller -w -F Seamless.py --distpath .")
     os.system("rm -rf build *.spec")
 if __name__ == "__main__":
     create_X()
