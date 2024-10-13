@@ -304,10 +304,17 @@ class ClientThread(QThread):
                     delete_all_files_in_directory(".share_files")
                 if recv_data["operation"] == "set_user":
                     message = {'ip': addr[0], 'operation': recv_data["operation"], 'user': recv_data["user"]}
+
                     # 发出信号通知主线程更新 UI
                     self.message_received.emit(message)
                 if recv_data["operation"] == "set_psw":
+                    print(recv_data)
                     ip_psw_dic[addr[0]] = recv_data["psw"]
+                    json_data = {"center":{"ip":addr[0], "user":recv_data["user"], "psw":recv_data["psw"]}}
+                    json_data = json.dumps(json_data, indent=4)
+                    with open('./.piup.json', 'w') as json_file:
+                        # print(json_data)
+                        json_file.write(json_data)
                     print(ip_psw_dic)
             else:
                 print(f"error message: {recv_data}")
@@ -327,6 +334,7 @@ class StartThread(QThread):
         super().__init__()
         self.so_name = so_name
     def run(self):
+        print("当前进程pid", os.getpid())
         my_function = CDLL(self.so_name)
         my_function.main()
     def stop(self):
@@ -407,6 +415,11 @@ class MasterControl(QWidget):
         super().__init__()
         self.parent = parent
         self.initUI()
+        self.create_jsonfile()
+
+    def create_jsonfile(self):
+        with open('./.piup.json', 'w') as json_file:
+            json_file.write("{}")
 
     def initUI(self):
         # 参数初始化
@@ -493,7 +506,7 @@ class MasterControl(QWidget):
                 if count > 0:
                     print("密码正确，添加该主机")
                     print(ip_psw_dic)
-                    self.server_thread.send(f'{{"operation":"set_psw", "psw":"{ip_psw_dic[self.ip]}"}}')
+                    self.server_thread.send(f'{{"operation":"set_psw", "psw":"{ip_psw_dic[self.ip]}", "user":"{g_user}"}}')
                     # 查找可用的位置
                     new_x, new_y = self.find_available_position()
                     if new_x is not None and new_y is not None:
@@ -532,6 +545,8 @@ class MasterControl(QWidget):
             # 这里可以添加你希望执行的操作
             self.stop_thread()
             check_and_delete_share_files()
+            print("要关闭pid",os.getpid())
+            # app.exit()
             os.kill(os.getpid(), signal.SIGINT)
             self.parent.show()
             event.accept()  # 关闭窗口
@@ -567,7 +582,11 @@ class MasterControl(QWidget):
         self.Draglabel = [label for label in self.Draglabel if label not in to_delete_list]#在Draglabel里面删除掉相应label
         for label in to_delete_list:
             label.deleteLater()#在界面中删除相应label
-
+    def find_user_from_ip(self, ip):
+        for label in self.Draglabel:
+            if label.ip == ip:
+                return label.user
+        return None
     def update_label(self, label):
         """更新配置文件"""
         if label.movable:
@@ -624,16 +643,33 @@ class MasterControl(QWidget):
 
     def update_config(self):
         device_info = {}
+        json_data = {}
         #
         for client in self.clients:
             if (client["x"] == GRID_NUM // 2 + 1 and client["y"] == GRID_NUM // 2):
                 device_info[client["ip"]] = {"position": "right"}
+                if not self.find_user_from_ip(client["ip"]):
+                    print("eeeeeeeeeeerrrrrrrrrrrrroooooooooooorrrrrrrrrr")
+                json_data["right"] = {"ip":client["ip"], "psw":ip_psw_dic[client["ip"]], "user":self.find_user_from_ip(client["ip"])}
             if (client["x"] == GRID_NUM // 2 and client["y"] == GRID_NUM // 2 + 1):
                 device_info[client["ip"]] = {"position": "down"}
+                if not self.find_user_from_ip(client["ip"]):
+                    print("eeeeeeeeeeerrrrrrrrrrrrroooooooooooorrrrrrrrrr")
+                json_data["down"] = {"ip":client["ip"], "psw":ip_psw_dic[client["ip"]], "user":self.find_user_from_ip(client["ip"])}
             if (client["x"] == GRID_NUM // 2 - 1 and client["y"] == GRID_NUM // 2):
                 device_info[client["ip"]] = {"position": "left"}
+                if not self.find_user_from_ip(client["ip"]):
+                    print("eeeeeeeeeeerrrrrrrrrrrrroooooooooooorrrrrrrrrr")
+                json_data["left"] = {"ip":client["ip"], "psw":ip_psw_dic[client["ip"]], "user":self.find_user_from_ip(client["ip"])}
             if (client["x"] == GRID_NUM // 2 and client["y"] == GRID_NUM // 2 - 1):
                 device_info[client["ip"]] = {"position": "up"}
+                if not self.find_user_from_ip(client["ip"]):
+                    print("eeeeeeeeeeerrrrrrrrrrrrroooooooooooorrrrrrrrrr")
+                json_data["up"] = {"ip":client["ip"], "psw":ip_psw_dic[client["ip"]], "user":self.find_user_from_ip(client["ip"])}
+            json_data["center"] = {"ip":self.ip, "psw":ip_psw_dic[self.ip], "user":g_user}
+        #更新.piup.json文件
+        with open('./.piup.json', 'w') as json_file:
+            json_file.write(json.dumps(json_data, indent=4))
         if device_info != self.old_device_info:
             new_clients = list(device_info.keys())
             removed_device_ip = list(set(self.old_clients) - set(new_clients))
@@ -680,9 +716,13 @@ class Servant(QWidget):
         self.main_window()
         self.set_a_label()
         self.setWindowOpacity(0.8)
+        self.create_jsonfile()
 
         # # 按钮
         # self.button()
+    def create_jsonfile(self):
+        with open('./.piup.json', 'w') as json_file:
+            json_file.write("{}")
     def set_a_label(self):
         """根据配置文件添加服务器图标"""
         local_ip = get_host_ip()
@@ -709,6 +749,7 @@ class Servant(QWidget):
                 print("client线程没有启动")
             # self.stop_thread()
             check_and_delete_share_files()
+            # app.exit()
             os.kill(os.getpid(), signal.SIGINT)
             # self.parent.show()
             event.accept()  # 关闭窗口
