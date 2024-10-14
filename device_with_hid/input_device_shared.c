@@ -667,7 +667,7 @@ void get_mouse_speed() {
 				printf("The username:%s\n",username);
 				// 构建要执行的命令
 				char cmd[256];
-				snprintf(cmd, sizeof(cmd), "su %s -c \"%s\"", username, "gsettings set org.gnome.desktop.peripherals.mouse speed 0");
+				snprintf(cmd, sizeof(cmd),  "gsettings set org.gnome.desktop.peripherals.mouse speed 0");
 				// 执行命令
 				int ret = system(cmd);
 				if (ret == -1) {
@@ -713,7 +713,7 @@ void get_mouse_speed() {
 					printf("The username:%s\n",username);
 					// 构建要执行的命令
 					char cmd[256];
-					snprintf(cmd, sizeof(cmd), "su %s -c \"%s\"", username, "gsettings set org.ukui.peripherals-mouse motion-acceleration 4.5");
+					snprintf(cmd, sizeof(cmd), "gsettings set org.ukui.peripherals-mouse motion-acceleration 4.5");
 					// 执行命令
 					int ret = system(cmd);
 					if (ret == -1) {
@@ -988,8 +988,8 @@ void Get_CtrlC_handler(int sig) {
 
 	char* mouse_cmd = calloc(10086, sizeof(char));
 	char* kbd_cmd = calloc(10086, sizeof(char));
-	sprintf(mouse_cmd, "sudo udevadm trigger --action=add %s", mouse_dev_path);
-	sprintf(kbd_cmd, "sudo udevadm trigger --action=add %s", kbd_dev_path);
+	sprintf(mouse_cmd, "udevadm trigger --action=add %s", mouse_dev_path);
+	sprintf(kbd_cmd, "udevadm trigger --action=add %s", kbd_dev_path);
 	system(mouse_cmd);
 	system(kbd_cmd);
 	free(mouse_cmd);
@@ -1065,8 +1065,8 @@ int main() {
 	///* deactivate mouse and keyboard */
 	char* mouse_cmd = calloc(10086, sizeof(char));
 	char* kbd_cmd = calloc(10086, sizeof(char));
-	sprintf(mouse_cmd, "sudo udevadm trigger --action=remove %s", mouse_dev_path);
-	sprintf(kbd_cmd, "sudo udevadm trigger --action=remove %s", kbd_dev_path);
+	sprintf(mouse_cmd, "udevadm trigger --action=remove %s", mouse_dev_path);
+	sprintf(kbd_cmd, "udevadm trigger --action=remove %s", kbd_dev_path);
 	system(mouse_cmd);
 	system(kbd_cmd);
 
@@ -1076,8 +1076,8 @@ int main() {
 	pthread_join(send_event_thread, NULL);
 	pthread_join(watch_mouse_thread, NULL);
 	// 防止程序非ctrl + c 退出, 键盘鼠标不可用
-	sprintf(mouse_cmd, "sudo udevadm trigger --action=add %s", mouse_dev_path);
-	sprintf(kbd_cmd, "sudo udevadm trigger --action=add %s", kbd_dev_path);
+	sprintf(mouse_cmd, "udevadm trigger --action=add %s", mouse_dev_path);
+	sprintf(kbd_cmd, "udevadm trigger --action=add %s", kbd_dev_path);
 	system(mouse_cmd);
 	system(kbd_cmd);
 	free(mouse_cmd);

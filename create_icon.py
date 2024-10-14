@@ -1,4 +1,6 @@
+import grp
 import os
+import pwd
 
 
 def create_desktop_file(executable_path):
@@ -11,6 +13,7 @@ Type=Application
 Name={file_name}
 Exec={executable_path}
 Icon={image_path}
+Path={os.getcwd()}
 Terminal=false
 """
     # 定义桌面文件的路径
@@ -27,17 +30,23 @@ Terminal=false
     # 写入桌面文件
     with open(desktop_file_path, 'w') as desktop_file:
         desktop_file.write(desktop_file_content)
-    # 给予执行权限
-    os.chmod(desktop_file_path, 0o755)
+    change_file_owner_and_permissions(desktop_file_path, os.getlogin(), "root")
     print(f"创建桌面图标: {desktop_file_path}")
-    # 写入桌面文件
+    # 写入桌面图标
     with open(app_desktop_path, 'w') as desktop_file:
         desktop_file.write(desktop_file_content)
-    # 给予执行权限
-    os.chmod(app_desktop_path, 0o755)
+    print(os.getlogin())
+    change_file_owner_and_permissions(app_desktop_path, os.getlogin(), "root")
     print(f"创建桌面图标: {app_desktop_path}")
 
 
+def change_file_owner_and_permissions(file_path, user_name, group_name):
+    try:
+        # 设置文件权限为 755 (rwxr-xr-x)
+        os.chmod(file_path, 0o755)
+        print(f"成功更改文件权限为 755。")
+    except Exception as e:
+        print(f"操作失败: {e}")
 def create_desktop_icons_for_executables():
     current_directory = os.getcwd()
 

@@ -12,7 +12,7 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
-
+import ctypes
 import sys
 import os
 import json
@@ -546,8 +546,9 @@ class MasterControl(QWidget):
             self.stop_thread()
             check_and_delete_share_files()
             print("要关闭pid",os.getpid())
-            # app.exit()
-            os.kill(os.getpid(), signal.SIGINT)
+            app.exit()
+            # os.kill(os.getpid(), signal.SIGINT)
+            add_kbd_mouse()
             self.parent.show()
             event.accept()  # 关闭窗口
         else:
@@ -749,8 +750,9 @@ class Servant(QWidget):
                 print("client线程没有启动")
             # self.stop_thread()
             check_and_delete_share_files()
-            # app.exit()
-            os.kill(os.getpid(), signal.SIGINT)
+            app.exit()
+            # os.kill(os.getpid(), signal.SIGINT)
+            add_kbd_mouse()
             # self.parent.show()
             event.accept()  # 关闭窗口
         else:
@@ -837,15 +839,26 @@ def check_and_delete_share_files():
     # 获取用户的主目录
     home_dir = os.path.expanduser("~")
     # 定义 share_files 目录的路径
-    share_files_dir = os.path.join(home_dir, ".share_files")
-
-    # 检查目录是否存在
-    if os.path.exists(share_files_dir):
-        # 如果存在，则删除该目录
-        shutil.rmtree(share_files_dir)
-        print(f"目录 {share_files_dir} 已删除")
+    share_file = os.path.join(home_dir, ".share_files")
+    shutil.rmtree(share_file)
+    share_file = os.path.join(home_dir, ".closefifo")
+    delete_a_file(share_file)
+    share_file = os.path.join(home_dir, ".releasefifo")
+    delete_a_file(share_file)
+    share_file = os.path.join(home_dir, ".hasdragfifo")
+    delete_a_file(share_file)
+    share_file = os.path.join(home_dir, ".enterfifo")
+    delete_a_file(share_file)
+    share_file = os.path.join(home_dir, ".minimizefifo")
+    delete_a_file(share_file)
+def delete_a_file(path):
+    # 检查文件是否存在
+    if os.path.exists(path):
+        # 如果存在，则删除该文件
+        os.remove(path)
+        print(f"文件 {path} 已删除")
     else:
-        print(f"目录 {share_files_dir} 不存在")
+        print(f"文件 {path} 不存在")
 def delete_all_files_in_directory(directory):
     # 获取用户的主目录
     home_dir = os.path.expanduser("~")
@@ -905,6 +918,37 @@ def get_passwords(local_default="", remote_default=""):
         return dialog.get_passwords()
     else:
         return None, None
+def get_mouse_kbd_event():
+    # 加载共享库
+    mylib = CDLL('./detect_mouse_kbd_event.so')
+    mouse = None
+    kbd = None
+
+    # 设置返回值类型
+    mylib.detect_kbd.restype = ctypes.c_char_p
+    mylib.detect_mouse.restype = ctypes.c_char_p
+
+    # 调用 C 函数并获取返回值
+    kbd_result = mylib.detect_kbd()
+    if kbd_result == "":
+        print("No keyboard detected.")
+    else:
+        print("Keyboard detected:", kbd_result.decode('utf-8'))
+        kbd =  kbd_result.decode('utf-8')
+
+    mouse_result = mylib.detect_mouse()
+    if mouse_result == "":
+        print("No mouse detected.")
+    else:
+        print("Mouse detected:", mouse_result.decode('utf-8'))
+        mouse = mouse_result.decode('utf-8')
+    return kbd, mouse
+def add_kbd_mouse():
+    kbd, mouse = get_mouse_kbd_event()
+    os.system(f"sudo udevadm trigger --action=add {kbd}")
+    print(f"sudo udevadm trigger --action=add {kbd}")
+    os.system(f"sudo udevadm trigger --action=add {mouse}")
+    print(f"sudo udevadm trigger --action=add {mouse}")
 def generate_json(device_info, ip_removed):
     # 从 device_info 中提取 IP 列表
     ip_list_full = list(device_info.keys())
