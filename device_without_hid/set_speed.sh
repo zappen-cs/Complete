@@ -1,1 +1,0 @@
-sudo -u wwlgsettings set org.ukui.peripherals-mouse motion-acceleration 4.5
