@@ -123,6 +123,10 @@ static int get_free_index() {
 }
 #if ENABLE_CLIPBOARD
 void copy_to_clipboard(const char *content) {
+	if(content[0] == '\0') {
+	    printf("clipboard is empty\n");
+	    return;
+	}
 	char command[1024];
 	FILE *wl_copy_ptr = NULL;
 	snprintf(command, sizeof(command), "echo -n '%s' | /usr/bin/wl-copy", content);
