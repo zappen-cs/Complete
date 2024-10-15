@@ -116,6 +116,7 @@ static struct libinput_interface interface = {
     .close_restricted = close_restricted,
 };
 
+#if ENABLE_COLIPBOARD
 static void send_clipboard(int sock_fd, struct mouse_kbd_event mke) {
 	//send clipboard content
 	printf("%s\n", __FUNCTION__);
@@ -134,6 +135,7 @@ static void send_clipboard(int sock_fd, struct mouse_kbd_event mke) {
 		}
 	}
 }
+#endif
 
 static void handle_event(struct libinput_event *event) {
     if (libinput_event_get_type(event) == LIBINPUT_EVENT_POINTER_MOTION) {
