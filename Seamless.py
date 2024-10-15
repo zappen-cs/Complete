@@ -12,6 +12,7 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
 import ctypes
 import sys
 import os
@@ -118,13 +119,13 @@ class DraggableLabel(QLabel):
                                          f"你确定要将文件发送到 {remote_ip} 吗？",
                                          QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
             if reply == QMessageBox.Yes:
+                if self.movable:
+                    self.main_window.server_thread.send(f'{{"operation":"send_files", "target_ip":"{remote_ip}"}}')
+                else:
+                    self.main_window.client_thread.send(f'{{"operation":"send_files", "target_ip":"{remote_ip}"}}')
                 # 获取所有文件路径
                 for file_path in file_paths:
                     try:
-                        if self.movable:
-                            self.main_window.server_thread.send(f'{{"operation":"send_files", "target_ip":"{remote_ip}"}}')
-                        else:
-                            self.main_window.client_thread.send(f'{{"operation":"send_files", "target_ip":"{remote_ip}"}}')
                         self.send_file_to_remote(file_path, self.user, remote_ip, self.remote_folder)
                     except Exception as e:
                         QMessageBox.critical(self, '错误', f'文件{file_path}传输失败:\n{str(e)}')
@@ -192,7 +193,7 @@ class PasswordDialog(QDialog):
         layout.addWidget(self.local_password_input)
 
         # 远程主机密码输入
-        self.remote_password_label = QLabel("远程主机密码:")
+        self.remote_password_label = QLabel(f"主机{remote_default}密码:")
         self.remote_password_input = QLineEdit()
         self.remote_password_input.setEchoMode(QLineEdit.Password)  # 隐藏输入字符
         self.remote_password_input.setText(remote_default)  # 设置默认值
@@ -549,6 +550,8 @@ class MasterControl(QWidget):
             # app.exit()
             # os.kill(os.getpid(), signal.SIGINT)
             add_kbd_mouse()
+            
+            kill_process_by_name("wl-copy")
             os.system(f"sudo kill -9 {os.getpid()}")
             self.parent.show()
             event.accept()  # 关闭窗口
@@ -754,6 +757,7 @@ class Servant(QWidget):
             app.exit()
             # os.kill(os.getpid(), signal.SIGINT)
             add_kbd_mouse()
+            kill_process_by_name("wl-copy")
             os.system(f"sudo kill -9 {os.getpid()}")
             # self.parent.show()
             event.accept()  # 关闭窗口
@@ -952,6 +956,26 @@ def add_kbd_mouse():
         return
     os.system(f"sudo udevadm trigger --action=add {mouse}")
     print(f"sudo udevadm trigger --action=add {mouse}")
+def kill_process_by_name(process_name):
+    try:
+        # 使用 pgrep 查找进程 ID
+        result = subprocess.run(['pgrep', process_name], stdout=subprocess.PIPE, text=True)
+        
+        # 获取进程ID列表，去掉空行
+        pids = result.stdout.strip().split('\n')
+        
+        if not pids or pids == ['']:
+            print(f"没有找到名称为 '{process_name}' 的进程")
+            return
+        
+        # 遍历所有找到的进程 ID 并杀死进程
+        for pid in pids:
+            os.kill(int(pid), 9)  # 使用信号 9 (SIGKILL) 杀死进程
+            print(f"进程 {process_name} (PID: {pid}) 已被终止")
+    
+    except Exception as e:
+        print(f"杀死进程 {process_name} 时出错: {e}")
+
 def generate_json(device_info, ip_removed):
     # 从 device_info 中提取 IP 列表
     ip_list_full = list(device_info.keys())

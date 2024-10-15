@@ -310,9 +310,9 @@ class BarWindow(QWidget):
         drop_mutex.unlock()
         self.urls = event.mimeData().urls()
         for file in self.urls:
-            self.label.setText(f"已选择文件: {file.toLocalFile()}")
-        print("file received")
-        self.send_file_to_remote(file.toLocalFile(), target_user, target_ip, dnd_buf_path, target_psw)
+            # self.label.setText(f"已选择文件: {file.toLocalFile()}")
+            print(f"file received: {file}")
+            self.send_file_to_remote(file.toLocalFile(), target_user, target_ip, dnd_buf_path, target_psw)
         copy_mutex.unlock()
 
     def mousePressEvent(self, event):

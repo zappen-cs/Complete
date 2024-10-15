@@ -68,7 +68,14 @@
 #define BUFFER_SIZE 1024
 
 #define ENABLE_CLIPBOARD 1
-#define ENABLE_DND 1
+
+
+#if ENABLE_CLIPBOARD
+uint8_t recv_buf[BUFFER_SIZE];
+uint8_t send_buf[BUFFER_SIZE];
+uint8_t clipboard_content[BUFFER_SIZE];
+#endif
+
 
 static struct uinput_user_dev vir_input_dev;
 static int vir_input_fd;
@@ -76,6 +83,7 @@ static int mouse_fd;
 static int kbd_fd;
 static char *kbd_dev_path;
 static char *mouse_dev_path;
+
 
 static int report_event(unsigned int type, unsigned int code, unsigned int value) {
 	struct input_event ev;
@@ -93,6 +101,8 @@ static int report_event(unsigned int type, unsigned int code, unsigned int value
 	return 0;
 }
 
+
+#define ENABLE_DND 1
 
 #if ENABLE_DND
 #include <semaphore.h>
@@ -150,6 +160,7 @@ static void handle_has_drag(){
 }
 
 static void handle_reaching_boundary(){
+	DEBUG_INFO("Creating surface");
 	
 	pthread_t watch_has_drag_fifo_thread;
 	int ret = pthread_create(&watch_has_drag_fifo_thread, NULL, handle_has_drag, NULL);
@@ -233,13 +244,6 @@ static void set_released_func(){
 
 
 
-
-#if ENABLE_CLIPBOARD
-uint8_t recv_buf[BUFFER_SIZE];
-uint8_t send_buf[BUFFER_SIZE];
-uint8_t clipboard_content[BUFFER_SIZE];
-#endif
-
 typedef struct {
 	double x;
 	double y;
@@ -261,12 +265,11 @@ struct mouse_kbd_event {
 };
 
 
+
+
 #define DEVICE_COUNT 6
 struct servant_device servant_devices[DEVICE_COUNT];
-int left_device_index = -1;
-int right_device_index = -1;
-int up_device_index = -1;
-int down_device_index = -1;
+struct devices_layout cur_devices_layout;
 
 int g_screen_width;
 int g_screen_height;
@@ -319,7 +322,6 @@ static struct libinput_interface interface = {
 	.close_restricted = close_restricted,
 };
 
-void copy_from_clipboard();
 static void send_clipboard(int sock_fd, struct mouse_kbd_event mke) {
 	//send clipboard content
 	printf("%s\n", __FUNCTION__);
@@ -366,7 +368,6 @@ static void handle_event(struct libinput_event *event) {
 	}
 #endif
 
-
 	if (libinput_event_get_type(event) == LIBINPUT_EVENT_POINTER_MOTION) {
 		struct libinput_event_pointer *pointer_event = libinput_event_get_pointer_event(event);
 		double dx, dy;
@@ -380,6 +381,7 @@ static void handle_event(struct libinput_event *event) {
 			dy = libinput_event_pointer_get_dy(pointer_event);
 		}
 		
+
 		global_x += dx * (1 + pointer_speed), global_y += dy * (1 + pointer_speed);
 
 		/* we assume we have three PC, PC1, PC2 and PC3, 
@@ -398,7 +400,7 @@ static void handle_event(struct libinput_event *event) {
 #if ENABLE_DND
 		// right boundary
 		if (global_x > g_screen_width - buf_width && !right_flag && left_button_pressed) {
-			DEBUG_INFO("Mouse reaching the right boundary, creating surface");
+			DEBUG_INFO("Mouse reaching the right boundary");
 			strcpy(args, "-target right");
 			handle_reaching_boundary();
 			right_flag = 1;
@@ -411,7 +413,7 @@ static void handle_event(struct libinput_event *event) {
 
 		// left boundary
 		if (global_x < buf_width && !left_flag && left_button_pressed) {
-			DEBUG_INFO("Mouse reaching the left boundary, creating surface");
+			DEBUG_INFO("Mouse reaching the left boundary");
 			strcpy(args, "-target left");
 			handle_reaching_boundary();
 			left_flag = 1;
@@ -423,14 +425,15 @@ static void handle_event(struct libinput_event *event) {
 		}
 #endif
 
+
 		if (global_x <= 0) {
 			DEBUG_INFO("Mouse reached the left boundary");
 			global_x = 0;
-			if (left_device_index >= 0) {
+			if (cur_devices_layout.left) {
+
 
 				struct mouse_kbd_event mke;
 				memset(&mke, 0, sizeof(mke));
-
 #if ENABLE_DND
 				if(left_button_pressed){
 					DEBUG_INFO("Releasing Left BTN");
@@ -450,36 +453,29 @@ static void handle_event(struct libinput_event *event) {
 					}
 				}else if(!left_flag){
 					strcpy(args, "-target left");
-					DEBUG_INFO("Mouse leaving current computer, creating surface");
 					handle_reaching_boundary();
 					left_flag = 1;
 					mke.dnd_status = NO_DND_PERFORMING;
 				}
 #endif
-
 				mke.type = SET_MOUSE_POSITION;
 				mke.sit = DEVICE_SEAT_LEFT;
 				mke.pos.x = g_screen_width;
 				mke.pos.y = global_y / g_screen_height;
-
-				send(servant_devices[left_device_index].sock_fd, &mke, sizeof(mke), 0);
+				send(cur_devices_layout.left->sock_fd, &mke, sizeof(mke), 0);
 				g_device_id = DEVICE_ID_LEFT;
 #if ENABLE_CLIPBOARD
-				send_clipboard(servant_devices[left_device_index].sock_fd, mke);
+				send_clipboard(cur_devices_layout.left->sock_fd, mke);
 #endif	
 				// block until receive the mouse event from other PC
 				while (1) {
 					memset(&mke, 0, sizeof(mke));
-					int ret = recv(servant_devices[left_device_index].sock_fd, &mke, sizeof(mke), 0);
-					if (ret <= 0) {
-						break;
-					}
+					recv(cur_devices_layout.left->sock_fd, &mke, sizeof(mke), 0);
 					if (mke.type == SET_MOUSE_POSITION) {
 						global_x = 0;
 						global_y = mke.pos.y * g_screen_height;
 						set_mouse_position(global_x, global_y);
 						g_device_id = DEVICE_ID_LOCAL;
-
 #if ENABLE_DND
 					if (mke.dnd_status == NO_DND_PERFORMING){
 						send_close_signal();
@@ -493,7 +489,6 @@ static void handle_event(struct libinput_event *event) {
 						// send_minimize_signal();
 					}
 #endif
-
 
 #if ENABLE_CLIPBOARD
 					} else if (mke.type == CLIPBOARD_EVENT) {
@@ -521,7 +516,7 @@ static void handle_event(struct libinput_event *event) {
 
 #if ENABLE_DND
 		int g_screen_width_adjusted = g_screen_width;
-		if (left_button_pressed && right_device_index >= 0)
+		if (left_button_pressed && cur_devices_layout.right)
 			g_screen_width_adjusted -= boundary_shift;
 		if (global_x > g_screen_width_adjusted) {
 #endif
@@ -530,11 +525,10 @@ static void handle_event(struct libinput_event *event) {
 #endif
 			DEBUG_INFO("Mouse reached the right boundary");
 			global_x = g_screen_width;
-			if (right_device_index >= 0) {
-			//if (cur_devices_layout.right) {
+			if (cur_devices_layout.right) {
+
 				struct mouse_kbd_event mke;
 				memset(&mke, 0, sizeof(mke));
-
 #if ENABLE_DND
 				if(left_button_pressed){
 					DEBUG_INFO("Releasing Left BTN");
@@ -554,42 +548,41 @@ static void handle_event(struct libinput_event *event) {
 					}
 				}else if(!right_flag){
 					strcpy(args, "-target right");
-					DEBUG_INFO("Mouse leaving current computer, creating surface");
 					handle_reaching_boundary();
 					right_flag = 1;
 					mke.dnd_status = NO_DND_PERFORMING;
 				}
 #endif
-
 				mke.type = SET_MOUSE_POSITION;
 				mke.sit = DEVICE_SEAT_RIGHT;
 				mke.pos.x = 0;
 				mke.pos.y = global_y / g_screen_height;
-				send(servant_devices[right_device_index].sock_fd, &mke, sizeof(mke), 0);
+				send(cur_devices_layout.right->sock_fd, &mke, sizeof(mke), 0);
 				g_device_id = DEVICE_ID_RIGHT;
 #if ENABLE_CLIPBOARD
-				send_clipboard(servant_devices[right_device_index].sock_fd, mke);
+				send_clipboard(cur_devices_layout.right->sock_fd, mke);
 #endif
 				// block until receive the mouse event from dev2
 				while (1) {
 					memset(&mke, 0, sizeof(mke));
-					int ret = recv(servant_devices[right_device_index].sock_fd, &mke, sizeof(mke), 0);
-					if (ret <= 0) {
-						break;
+					int temp = recv(cur_devices_layout.right->sock_fd, &mke, sizeof(mke), 0);
+					if (temp > 0) {
+						printf("%d\n",temp);
+					}
+					else {
+						perror("failed to receive");
 					}
 					if (mke.type == SET_MOUSE_POSITION) {
 						global_x = g_screen_width;
-
 #if ENABLE_DND
 						if(mke.dnd_status == MOUSE_LEFT_BTN_PRESSED){
 							global_x -= boundary_shift;
 						}
 #endif
-
 						global_y = mke.pos.y * g_screen_height;
 						set_mouse_position(global_x, global_y);
 						g_device_id = DEVICE_ID_LOCAL;
-
+						
 #if ENABLE_DND
 					if (mke.dnd_status == NO_DND_PERFORMING){
 						send_close_signal();
@@ -602,9 +595,7 @@ static void handle_event(struct libinput_event *event) {
 						report_event(EV_SYN, SYN_REPORT, 0);
 						// send_minimize_signal();
 					}
-#endif	
-			
-
+#endif
 						
 #if ENABLE_CLIPBOARD
 					} else if (mke.type == CLIPBOARD_EVENT) {
@@ -631,25 +622,21 @@ static void handle_event(struct libinput_event *event) {
 		if (global_y <= 0) {
 			DEBUG_INFO("Mouse reached the top boundary");
 			global_y = 0;
-			if (up_device_index >= 0) {
-			//if (cur_devices_layout.up) {
+			if (cur_devices_layout.up) {
 				struct mouse_kbd_event mke;
 				memset(&mke, 0, sizeof(mke));
 				mke.type = SET_MOUSE_POSITION;
 				mke.sit = DEVICE_SEAT_UP;
 				mke.pos.x = global_x / g_screen_width;
 				mke.pos.y = 0;
-				send(servant_devices[up_device_index].sock_fd, &mke, sizeof(mke), 0);
+				send(cur_devices_layout.up->sock_fd, &mke, sizeof(mke), 0);
 				g_device_id = DEVICE_ID_UP;
 #if ENABLE_CLIPBOARD
-				send_clipboard(servant_devices[up_device_index].sock_fd, mke);
+				send_clipboard(cur_devices_layout.up->sock_fd, mke);
 #endif
 				while (1) {
 					memset(&mke, 0, sizeof(mke));
-					int ret = recv(servant_devices[up_device_index].sock_fd, &mke, sizeof(mke), 0);
-					if (ret <= 0) {
-						break;
-					}
+					recv(cur_devices_layout.up->sock_fd, &mke, sizeof(mke), 0);
 					if (mke.type == SET_MOUSE_POSITION) {
 						global_x = mke.pos.x * g_screen_width;
 						global_y = 0;
@@ -682,26 +669,21 @@ static void handle_event(struct libinput_event *event) {
 		if (global_y >= g_screen_height) {
 			DEBUG_INFO("Mouse reached the bottom boundary");
 			global_y = g_screen_height;
-			printf("down_device_index:%d\n", down_device_index);
-			if (down_device_index >= 0) {
-			//if (cur_devices_layout.down) {
+			if (cur_devices_layout.down) {
 				struct mouse_kbd_event mke;
 				memset(&mke, 0, sizeof(mke));
 				mke.type = SET_MOUSE_POSITION;
 				mke.sit = DEVICE_SEAT_DOWN;
 				mke.pos.x = global_x / g_screen_width;
 				mke.pos.y = 0;
-				send(servant_devices[down_device_index].sock_fd, &mke, sizeof(mke), 0);
+				send(cur_devices_layout.down->sock_fd, &mke, sizeof(mke), 0);
 				g_device_id = DEVICE_ID_DOWN;
 #if ENABLE_CLIPBOARD
-				send_clipboard(servant_devices[down_device_index].sock_fd, mke);
+				send_clipboard(cur_devices_layout.down->sock_fd, mke);
 #endif
 				while (1) {
 					memset(&mke, 0, sizeof(mke));
-					int ret = recv(servant_devices[down_device_index].sock_fd, &mke, sizeof(mke), 0);
-					if (ret <= 0) {
-						break;
-					}
+					recv(cur_devices_layout.down->sock_fd, &mke, sizeof(mke), 0);
 					if (mke.type == SET_MOUSE_POSITION) {
 						global_x = mke.pos.x * g_screen_width;
 						global_y = g_screen_height;
@@ -826,7 +808,6 @@ static int creat_vir_input_device() {
 }
 
 
-
 void *send_event_thread_func() {
 	int ret = 0;
 	ret = creat_vir_input_device();
@@ -853,53 +834,53 @@ void *send_event_thread_func() {
 					mke.ev = event;
 					int cur_sockfd;
 					if (g_device_id == DEVICE_ID_UP) {
-						ret = send(servant_devices[up_device_index].sock_fd, &mke, sizeof(mke), 0);
-						if (ret <= 0) {
-							failed_times++;
-							if (failed_times == 3) {
-								failed_times = 0;
-								g_device_id = DEVICE_ID_LOCAL;
+						if (cur_devices_layout.up) {
+							ret = send(cur_devices_layout.up->sock_fd, &mke, sizeof(mke), 0);
+							if (ret <= 0) {
+								failed_times++;
+								if (failed_times == 3) {
+									failed_times = 0;
+									g_device_id = DEVICE_ID_LOCAL;
+								}
 							}
 						}
 
 					} else if (g_device_id == DEVICE_ID_DOWN) {
-						ret = send(servant_devices[down_device_index].sock_fd, &mke, sizeof(mke), 0);
-						if (ret <= 0) {
-							perror("Failed to send to down");
-							failed_times++;
-							if (failed_times == 3) {
-								failed_times = 0;
-								g_device_id = DEVICE_ID_LOCAL;
+						if (cur_devices_layout.down) {
+							ret = send(cur_devices_layout.down->sock_fd, &mke, sizeof(mke), 0);
+							if (ret <= 0) {
+								failed_times++;
+								if (failed_times == 3) {
+									failed_times = 0;
+									g_device_id = DEVICE_ID_LOCAL;
+								}
 							}
 						}
 					} else if (g_device_id == DEVICE_ID_LEFT) {
-						ret = send(servant_devices[left_device_index].sock_fd, &mke, sizeof(mke), 0);
-						if (ret <= 0) {
-							failed_times++;
-							if (failed_times == 3) {
-								failed_times = 0;
-								g_device_id = DEVICE_ID_LOCAL;
-#if ENABLE_DND
-								send_close_signal();
-								left_flag = 0;
-#endif
+						if (cur_devices_layout.left) {
+							ret = send(cur_devices_layout.left->sock_fd, &mke, sizeof(mke), 0);
+							if (ret <= 0) {
+								failed_times++;
+								if (failed_times == 3) {
+									failed_times = 0;
+									g_device_id = DEVICE_ID_LOCAL;
+								}
 							}
 						}
 					} else {
-						ret = send(servant_devices[right_device_index].sock_fd, &mke, sizeof(mke), 0);
-						if (ret <= 0) {
-							//printf("Failed to send\n");
-							failed_times++;
-							if (failed_times == 3) {
-								failed_times = 0;
-								g_device_id = DEVICE_ID_LOCAL;
-#if ENABLE_DND
-								send_close_signal();
-								right_flag = 0;
-#endif
+						if (cur_devices_layout.right) {
+							cur_sockfd = cur_devices_layout.right->sock_fd;
+							ret = send(cur_sockfd, &mke, sizeof(mke), 0);
+							if (ret <= 0) {
+								//printf("Failed to send\n");
+								failed_times++;
+								if (failed_times == 3) {
+									failed_times = 0;
+									g_device_id = DEVICE_ID_LOCAL;
+								}
 							}
-						}
 
+						}
 					}
 				}
 			}
@@ -989,7 +970,7 @@ void get_mouse_speed() {
 				printf("The username:%s\n",username);
 				// 构建要执行的命令
 				char cmd[256];
-				snprintf(cmd, sizeof(cmd), "gsettings set org.gnome.desktop.peripherals.mouse speed 0");
+				snprintf(cmd, sizeof(cmd), "su %s -c \"%s\"", username, "gsettings set org.gnome.desktop.peripherals.mouse speed 0");
 				// 执行命令
 				int ret = system(cmd);
 				if (ret == -1) {
@@ -1035,7 +1016,7 @@ void get_mouse_speed() {
 					printf("The username:%s\n",username);
 					// 构建要执行的命令
 					char cmd[256];
-					snprintf(cmd, sizeof(cmd), "gsettings set org.ukui.peripherals-mouse motion-acceleration 4.5");
+					snprintf(cmd, sizeof(cmd), "su %s -c \"%s\"", username, "gsettings set org.ukui.peripherals-mouse motion-acceleration 4.5");
 					// 执行命令
 					int ret = system(cmd);
 					if (ret == -1) {
@@ -1136,13 +1117,13 @@ void connect_to_server(int *fd, char *ip) {
 
 void update_layout(int servant_device_index, char *pos) {
 	if (strcmp(pos, "up") == 0) {
-		up_device_index = servant_device_index;
+		cur_devices_layout.up = &servant_devices[servant_device_index];
 	} else if (strcmp(pos, "down") == 0) {
-		down_device_index = servant_device_index;
+		cur_devices_layout.down = &servant_devices[servant_device_index];
 	} else if (strcmp(pos, "left") == 0) {
-		left_device_index = servant_device_index;
+		cur_devices_layout.left = &servant_devices[servant_device_index];
 	} else {
-		right_device_index = servant_device_index;
+		cur_devices_layout.right = &servant_devices[servant_device_index];
 	}
 }
 int find_device_info_by_ip(char *ip, char *pos) {
@@ -1156,10 +1137,10 @@ int find_device_info_by_ip(char *ip, char *pos) {
 }
 void update_status() {
 	// 将当前布局的上下左右指针置为空
-	up_device_index = -1;
-	down_device_index = -1;
-	left_device_index = -1;
-	right_device_index = -1;
+	cur_devices_layout.up = NULL;
+	cur_devices_layout.down = NULL;
+	cur_devices_layout.left = NULL;
+	cur_devices_layout.right = NULL;
 	// 1.get info of config.json
 	char **device_ip_list = NULL;
 	char **device_pos_list = NULL;
@@ -1308,10 +1289,10 @@ void Get_CtrlC_handler(int sig) {
 
 	printf("捕捉到Ctrl-C\n");
 
-	char* mouse_cmd = calloc(100, sizeof(char));
-	char* kbd_cmd = calloc(100, sizeof(char));
-	sprintf(mouse_cmd, "udevadm trigger --action=add %s", mouse_dev_path);
-	sprintf(kbd_cmd, "udevadm trigger --action=add %s", kbd_dev_path);
+	char* mouse_cmd = calloc(10086, sizeof(char));
+	char* kbd_cmd = calloc(10086, sizeof(char));
+	sprintf(mouse_cmd, "sudo udevadm trigger --action=add %s", mouse_dev_path);
+	sprintf(kbd_cmd, "sudo udevadm trigger --action=add %s", kbd_dev_path);
 	system(mouse_cmd);
 	system(kbd_cmd);
 	free(mouse_cmd);
@@ -1323,13 +1304,14 @@ void Get_CtrlC_handler(int sig) {
 	send_close_signal();
 #endif
 
+
 	exit(0);
 }
 
 int main() {
 	int ret;
 	signal(SIGINT, Get_CtrlC_handler);
-	//pthread_mutex_init(&g_layout_lock, NULL);
+
 
 	// TODO: 鼠标键盘热插拔
 	get_dev_file_path();
@@ -1422,10 +1404,10 @@ int main() {
 	}
 
 	///* deactivate mouse and keyboard */
-	char* mouse_cmd = calloc(100, sizeof(char));
-	char* kbd_cmd = calloc(100, sizeof(char));
-	sprintf(mouse_cmd, "udevadm trigger --action=remove %s", mouse_dev_path);
-	sprintf(kbd_cmd, "udevadm trigger --action=remove %s", kbd_dev_path);
+	char* mouse_cmd = calloc(10086, sizeof(char));
+	char* kbd_cmd = calloc(10086, sizeof(char));
+	sprintf(mouse_cmd, "sudo udevadm trigger --action=remove %s", mouse_dev_path);
+	sprintf(kbd_cmd, "sudo udevadm trigger --action=remove %s", kbd_dev_path);
 	system(mouse_cmd);
 	system(kbd_cmd);
 
@@ -1435,12 +1417,15 @@ int main() {
 	pthread_join(send_event_thread, NULL);
 	pthread_join(watch_mouse_thread, NULL);
 	// 防止程序非ctrl + c 退出, 键盘鼠标不可用
-	sprintf(mouse_cmd, "udevadm trigger --action=add %s", mouse_dev_path);
-	sprintf(kbd_cmd, "udevadm trigger --action=add %s", kbd_dev_path);
+	sprintf(mouse_cmd, "sudo udevadm trigger --action=add %s", mouse_dev_path);
+	sprintf(kbd_cmd, "sudo udevadm trigger --action=add %s", kbd_dev_path);
 	system(mouse_cmd);
 	system(kbd_cmd);
 	free(mouse_cmd);
 	free(kbd_cmd);
+
+
+
 	return 0;
 }
 
