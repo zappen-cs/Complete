@@ -446,14 +446,10 @@ class MasterControl(QWidget):
         """加载配置文件，如果不存在则创建默认配置"""
         json_output = generate_json({}, [])
         # 如果文件不存在，创建一个空文件
-        if not os.path.exists('./config.json'):
-            with open('./config.json', 'w') as json_file:
-                json_file.write(json_output)
-        else:
-            with open('./config.json', 'r+') as json_file:
-                json_file.seek(0)
-                json_file.truncate()
-                json_file.write(json_output)
+        with open('./config.json', 'w') as json_file:
+            json_file.seek(0)
+            json_file.truncate()
+            json_file.write(json_output)
         self.clients = []  # 初始化客户端列表
         self.old_clients = []  # 初始化旧客户端列表
         self.old_device_info = {}  # 初始化设备信息
@@ -684,6 +680,7 @@ class MasterControl(QWidget):
             with open('config.json', 'r+') as json_file:
                 json_file.seek(0)
                 json_file.truncate()
+            with open('config.json', 'r+') as json_file:
                 json_file.write(json_output)
             self.old_clients = new_clients
             self.old_device_info = device_info
