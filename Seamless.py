@@ -175,7 +175,7 @@ class DraggableLabel(QLabel):
             drag.exec_(Qt.CopyAction)
 
 class PasswordDialog(QDialog):
-    def __init__(self, local_default="", remote_default=""):
+    def __init__(self, local_default="", remote_default="", remote_ip=""):
         super().__init__()
 
         # 设置对话框标题
@@ -193,7 +193,7 @@ class PasswordDialog(QDialog):
         layout.addWidget(self.local_password_input)
 
         # 远程主机密码输入
-        self.remote_password_label = QLabel(f"主机{remote_default}密码:")
+        self.remote_password_label = QLabel(f"主机{remote_ip}密码:")
         self.remote_password_input = QLineEdit()
         self.remote_password_input.setEchoMode(QLineEdit.Password)  # 隐藏输入字符
         self.remote_password_input.setText(remote_default)  # 设置默认值
@@ -485,7 +485,7 @@ class MasterControl(QWidget):
                     remote_psw = ip_psw_dic.get(ip, "")
                     # 如果本地或远端密码没有存储就弹出窗口获取密码
                     if self_psw == "" or remote_psw == "":
-                        self_psw, remote_psw = get_passwords(local_default=self_psw, remote_default=remote_psw)
+                        self_psw, remote_psw = get_passwords(local_default=self_psw, remote_default=remote_psw, remote_ip=ip)
                         if (not self_psw) and (not remote_psw):
                             print("关闭了窗口")
                             return
@@ -546,7 +546,7 @@ class MasterControl(QWidget):
             
             kill_process_by_name("wl-copy")
             kill_process_by_name("four.py")
-            os.system(f"sudo kill -9 {os.getpid()}")
+            os.system(f"sudo kill {os.getpid()}")
             self.parent.show()
             event.accept()  # 关闭窗口
         else:
@@ -754,7 +754,7 @@ class Servant(QWidget):
             add_kbd_mouse()
             kill_process_by_name("wl-copy")
             kill_process_by_name("four.py")
-            os.system(f"sudo kill -9 {os.getpid()}")
+            os.system(f"sudo kill {os.getpid()}")
             # self.parent.show()
             event.accept()  # 关闭窗口
         else:
@@ -912,9 +912,9 @@ def check_ip_psw(user, ip, password):
         # 删除临时文件
         if os.path.exists(local_file):
             os.remove(local_file)
-def get_passwords(local_default="", remote_default=""):
+def get_passwords(local_default="", remote_default="", remote_ip=""):
     # 假设已经有QApplication，不需要再创建
-    dialog = PasswordDialog(local_default, remote_default)
+    dialog = PasswordDialog(local_default, remote_default, remote_ip)
 
     if dialog.exec_() == QDialog.Accepted:
         return dialog.get_passwords()
