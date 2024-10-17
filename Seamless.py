@@ -548,7 +548,7 @@ class MasterControl(QWidget):
             add_kbd_mouse()
             
             kill_process_by_name("wl-copy")
-            os.system(f"sudo kill -9 {os.getpid()}")
+            os.system(f"sudo kill {os.getpid()}")
             self.parent.show()
             event.accept()  # 关闭窗口
         else:
@@ -755,7 +755,7 @@ class Servant(QWidget):
             # os.kill(os.getpid(), signal.SIGINT)
             add_kbd_mouse()
             kill_process_by_name("wl-copy")
-            os.system(f"sudo kill -9 {os.getpid()}")
+            os.system(f"sudo kill {os.getpid()}")
             # self.parent.show()
             event.accept()  # 关闭窗口
         else:
