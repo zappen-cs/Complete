@@ -64,14 +64,11 @@ def change_file_owner_and_permissions(file_path, user_name, group_name):
         print(f"操作失败: {e}")
 def create_desktop_icons_for_executables():
     current_directory = os.getcwd()
-
-    # 遍历当前目录
-    for item in os.listdir(current_directory):
-        item_path = os.path.join(current_directory, item)
-
-        # 检查是否是可执行文件
-        if os.path.isfile(item_path) and os.access(item_path, os.X_OK) and not (os.path.splitext(item_path)[1] == '.so'):
-            create_desktop_file(item_path)
+    item_path = os.path.join(current_directory, "Seamless")
+    if os.path.exists(item_path):
+        create_desktop_file(item_path)
+    else:
+        print("Seamless可执行文件不存在")
 
 def create_X():
     os.system("pyinstaller -w -F Seamless.py --distpath .")
