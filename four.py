@@ -270,11 +270,11 @@ class BarWindow(QWidget):
                 stdout, stderr = process.communicate()
                 return_code = process.returncode
         if return_code == 0:
-            print("文件传输成功")
+            print(f"文件传输成功{stdout}")
 
             # QMessageBox.information(None, "成功", "文件传输成功")
         else:
-            print(f"文件传输失败")
+            print(f"文件传输失败{stderr}")
             QMessageBox.critical(None, "错误", f"文件传输失败")
 
 
@@ -312,7 +312,8 @@ class BarWindow(QWidget):
         for file in self.urls:
             # self.label.setText(f"已选择文件: {file.toLocalFile()}")
             print(f"file received: {file}")
-            self.send_file_to_remote(file.toLocalFile(), target_user, target_ip, dnd_buf_path, target_psw)
+            temp = dnd_buf_path.replace(os.getlogin(), target_user)
+            self.send_file_to_remote(file.toLocalFile(), target_user, target_ip, temp, target_psw)
         copy_mutex.unlock()
 
     def mousePressEvent(self, event):
@@ -381,7 +382,7 @@ if __name__ == "__main__":
 
     if place != "center":
         target = "center"
-    
+
 
 
     username = os.getlogin()
@@ -390,7 +391,8 @@ if __name__ == "__main__":
     print("four.py pid: ",os.getpid())
     dnd_buf_path = home_path + "/.seamlessdnd"
     if not os.path.exists(dnd_buf_path):
-        os.mkdir(dnd_buf_path)
+        os.system(f"""su {os.getlogin()} -c "mkdir {dnd_buf_path}" """)
+        # os.mkdir(dnd_buf_path)
     release_fifo_path = home_path + "/.releasefifo"
     if not os.path.exists(release_fifo_path):
         os.mkfifo(release_fifo_path)

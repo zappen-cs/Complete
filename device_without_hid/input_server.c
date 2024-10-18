@@ -179,25 +179,46 @@ static void handle_reaching_boundary(){
 	pthread_t start_surface;
 	pthread_create(&start_surface, NULL, start_py, NULL);
 }
-// 写死了 要改
-static void handle_leaving_boundary(){
+
+
+static void thread_write_close_fifo(){
+	DEBUG_INFO("WRITTING ENTER_FIFO");
 	FILE *fifo = fopen(enter_fifo_path, "w");
 	if (fifo == NULL){
 		perror("Failed to open fifo");
 	}
-	DEBUG_INFO("FIFO WRITTEN");
+	DEBUG_INFO("ENTER_FIFO WRITTEN");
 	fprintf(fifo, "%d", MOUSE_LEFT_BOUNDARY);
 	fclose(fifo);
 }
 
-static void handle_released_in_boundary(){
+// 写死了 要改
+static void handle_leaving_boundary(){
+	pthread_t write_close_fifo_thread;
+	int ret = pthread_create(&write_close_fifo_thread, NULL, thread_write_close_fifo, NULL);
+	if(ret != 0){
+		perror("Failed to create write_close_fifo_thread");
+	}
+}
+
+
+static void thread_write_release_fifo(){
+	DEBUG_INFO("WRITTING RELEASE_FIFO");
 	FILE *fifo = fopen(release_fifo_path, "w");
 	if (fifo == NULL){
 		perror("Failed to open fifo");
 	}
-	DEBUG_INFO("FIFO WRITTEN");
+	DEBUG_INFO("RELEASE_FIFO WRITTEN");
 	fprintf(fifo, "%d", MOUSE_RELEASED_IN_BOUNDARY);
 	fclose(fifo);
+}
+
+static void handle_released_in_boundary(){
+	pthread_t write_release_fifo_thread;
+	int ret = pthread_create(&write_release_fifo_thread, NULL, thread_write_release_fifo, NULL);
+	if(ret != 0){
+		perror("Failed to create write_release_fifo_thread");
+	}
 	if(need_reopen_left){
 		handle_reaching_boundary();
 		need_reopen_left = 0;
@@ -210,24 +231,43 @@ static void handle_released_in_boundary(){
 	}
 }
 
-static void send_minimize_signal(){
+static void thread_send_minimize_signal(){
+	DEBUG_INFO("WRITTING MINIMIZE_FIFO");
 	FILE *fifo = fopen(minimize_fifo_path, "w");
 	if (fifo == NULL){
 		perror("Failed to open fifo");
 	}
-	DEBUG_INFO("FIFO WRITTEN");
+	DEBUG_INFO("MINIMIZE_FIFO WRITTEN");
 	fprintf(fifo, "%d", 0x123456);
 	fclose(fifo);
 }
 
-static void send_close_signal(){
+static void send_minimize_signal(){
+	pthread_t send_minimize_signal_thread;
+	int ret = pthread_create(&send_minimize_signal_thread, NULL, thread_send_minimize_signal, NULL);
+	if (ret != 0) {
+	    DEBUG_INFO("create send_minimize_signal_thread failed");
+	}
+}
+
+static void thread_send_close_signal(){
+	DEBUG_INFO("WRITTING CLOSE_FIFO");
 	FILE *fifo = fopen(close_fifo_path, "w");
 	if (fifo == NULL){
 		perror("Failed to open fifo");
 	}
-	DEBUG_INFO("FIFO WRITTEN");
+	DEBUG_INFO("CLOSE_FIFO WRITTEN");
 	fprintf(fifo, "%d", 0x654321);
 	fclose(fifo);
+}
+
+static void send_close_signal(){
+	pthread_t send_close_signal_thread;
+	int ret = pthread_create(&send_close_signal_thread, NULL, thread_send_close_signal, NULL);
+	if (ret != 0) {
+	    DEBUG_INFO("create send_close_signal_thread failed");
+	}
+
 }
 
 
@@ -917,7 +957,7 @@ int main() {
 	strcpy(close_fifo_path, home_path);
 	strcat(close_fifo_path, "/.closefifo");
 
-	buf_width = g_screen_width / 50;
+	buf_width = g_screen_width / 20;
 	sem_init(&sem, 0, 0);
 	pthread_t set_released_thread;
 	ret = pthread_create(&set_released_thread, NULL, set_released_func, NULL);
