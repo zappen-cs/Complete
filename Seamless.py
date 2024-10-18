@@ -749,8 +749,6 @@ class Servant(QWidget):
                 print("client线程没有启动")
             # self.stop_thread()
             check_and_delete_share_files()
-            app.exit()
-            # os.kill(os.getpid(), signal.SIGINT)
             add_kbd_mouse()
             kill_process_by_name("wl-copy")
             kill_process_by_name("four.py")
